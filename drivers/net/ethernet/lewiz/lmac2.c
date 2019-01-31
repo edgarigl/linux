@@ -111,17 +111,6 @@ static void lmac_prepare_rx(struct net_device *dev)
 		lp->base_addr + DMA_S2M_OFFSET + DMA_R_LENGTH);
 }
 
-static void k_hexdump(char *name, unsigned char *buf, int len)
-{
-        int i;
-        printk("%s: %lx %d\n", name, (unsigned long)buf, len);
-
-        for (i = 0; i < len; i++) {
-                printk("%2.2x ", buf[i]);
-        }
-	printk("\n");
-}
-
 static irqreturn_t lmac2_rx_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
@@ -219,11 +208,6 @@ static int lmac2_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	lp->tx.phys = dma_map_single(dev->dev.parent,
 			skb->data, MAX_FRAME_SIZE,
 			DMA_FROM_DEVICE);
-
-	if (DEBUG) {
-		printk("setup DMA tx phys %llx\n", lp->tx.phys);
-		k_hexdump("xmit", skb->data, skb->len);
-	}
 
 	writel((uint32_t)lp->tx.phys,
 		lp->base_addr + DMA_M2S_OFFSET + DMA_R_ADDR);
