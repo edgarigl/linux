@@ -76,6 +76,22 @@ struct net_local {
 	} tx;
 };
 
+static inline void lmac2_ack_interrupt(struct net_local *lp,
+					unsigned long offset)
+{
+	u32 r_sr;
+
+	// Ack the IRQ.
+	writel(DMA_SR_IOC_IRQ, lp->base_addr + offset + DMA_R_SR);
+
+	smp_mb();
+	// When co-simulating there might be a long delay for
+	// the interrupt ACK to propagate. Read-back to make sure
+	// it has bitten.
+	r_sr = readl(lp->base_addr + offset + DMA_R_SR);
+	BUG_ON(r_sr & DMA_SR_IOC_IRQ);
+}
+
 static void lmac2_tx_timeout(struct net_device *dev)
 {
 	printk("%s: timeout\n", __func__);
@@ -125,12 +141,10 @@ static irqreturn_t lmac2_rx_interrupt(int irq, void *dev_id)
 		struct sk_buff *skb = lp->rx.skb;
 		u32 len;
 
+		lmac2_ack_interrupt(lp, DMA_S2M_OFFSET);
+
 		dma_unmap_single(dev->dev.parent, lp->rx.phys,
 				MAX_FRAME_SIZE, DMA_FROM_DEVICE);
-
-		// Ack the IRQ.
-		writel(DMA_SR_IOC_IRQ,
-			lp->base_addr + DMA_S2M_OFFSET + DMA_R_SR);
 
 		// Read out the length.
 		len = readl(lp->base_addr + DMA_S2M_OFFSET + DMA_R_LENGTH);
@@ -163,12 +177,11 @@ static irqreturn_t lmac2_tx_interrupt(int irq, void *dev_id)
 	u32 tx_sr;
 
         spin_lock(&lp->tx.lock);
-	tx_sr = readl(lp->base_addr + DMA_M2S_OFFSET + DMA_R_SR);
 
+	tx_sr = readl(lp->base_addr + DMA_M2S_OFFSET + DMA_R_SR);
 	if (tx_sr & DMA_SR_IOC_IRQ) {
-		// Ack the IRQ.
-		writel(DMA_SR_IOC_IRQ,
-			lp->base_addr + DMA_M2S_OFFSET + DMA_R_SR);
+		lmac2_ack_interrupt(lp, DMA_M2S_OFFSET);
+
 		dma_unmap_single(dev->dev.parent, lp->tx.phys,
 				lp->tx.skb->len, DMA_TO_DEVICE);
 		dev->stats.tx_packets++;
