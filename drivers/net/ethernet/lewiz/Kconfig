@@ -1,10 +1,26 @@
 #
 # LeWiz device configuration
 #
+
+config NET_VENDOR_LEWIZ
+        bool "LeWiz devices"
+        default y
+        help
+          If you have a network (Ethernet) card belonging to this class, say Y.
+
+if NET_VENDOR_LEWIZ
+
+config LEWIZ_LMAC1
+	tristate "LeWiz LMAC1 support"
+	select CRC32
+	select MII
+	help
+	  Support for LeWiz LMAC1 Ethernet MAC.
+
 config LEWIZ_LMAC2
 	tristate "LeWiz LMAC2 support"
 	select CRC32
 	select MII
 	help
 	  Support for LeWiz LMAC2 Ethernet MAC.
-
+endif
