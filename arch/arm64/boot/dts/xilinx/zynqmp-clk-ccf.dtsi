@@ -38,6 +38,31 @@
 		#clock-cells = <0>;
 		clock-frequency = <27000000>;
 	};
+
+        clk100: clk100 {
+                compatible = "fixed-clock";
+                #clock-cells = < 0x00 >;
+                clock-frequency = < 0x5f5e100 >;
+                phandle = < 0x05 >;
+        };
+
+        clk125: clk125 {
+                compatible = "fixed-clock";
+                #clock-cells = < 0x00 >;
+                clock-frequency = < 0x7735940 >;
+        };
+
+        clk200: clk200 {
+                compatible = "fixed-clock";
+                #clock-cells = < 0x00 >;
+                clock-frequency = < 0xbebc200 >;
+        };
+
+        clk250: clk250 {
+                compatible = "fixed-clock";
+                #clock-cells = < 0x00 >;
+                clock-frequency = < 0xee6b280 >;
+        };
 };
 
 &can0 {
@@ -121,31 +146,23 @@
 };
 
 &gem0 {
-	clocks = <&zynqmp_clk LPD_LSBUS>, <&zynqmp_clk GEM0_REF>,
-		 <&zynqmp_clk GEM0_TX>, <&zynqmp_clk GEM0_RX>,
-		 <&zynqmp_clk GEM_TSU>;
-	clock-names = "pclk", "hclk", "tx_clk", "rx_clk", "tsu_clk";
+	clocks = <&clk125 &clk125 &clk125>;
+	clock-names = "pclk", "hclk", "tx_clk";
 };
 
 &gem1 {
-	clocks = <&zynqmp_clk LPD_LSBUS>, <&zynqmp_clk GEM1_REF>,
-		 <&zynqmp_clk GEM1_TX>, <&zynqmp_clk GEM1_RX>,
-		 <&zynqmp_clk GEM_TSU>;
-	clock-names = "pclk", "hclk", "tx_clk", "rx_clk", "tsu_clk";
+	clocks = <&clk125 &clk125 &clk125>;
+	clock-names = "pclk", "hclk", "tx_clk";
 };
 
 &gem2 {
-	clocks = <&zynqmp_clk LPD_LSBUS>, <&zynqmp_clk GEM2_REF>,
-		 <&zynqmp_clk GEM2_TX>, <&zynqmp_clk GEM2_RX>,
-		 <&zynqmp_clk GEM_TSU>;
-	clock-names = "pclk", "hclk", "tx_clk", "rx_clk", "tsu_clk";
+	clocks = <&clk125 &clk125 &clk125>;
+	clock-names = "pclk", "hclk", "tx_clk";
 };
 
 &gem3 {
-	clocks = <&zynqmp_clk LPD_LSBUS>, <&zynqmp_clk GEM3_REF>,
-		 <&zynqmp_clk GEM3_TX>, <&zynqmp_clk GEM3_RX>,
-		 <&zynqmp_clk GEM_TSU>;
-	clock-names = "pclk", "hclk", "tx_clk", "rx_clk", "tsu_clk";
+	clocks = <&clk125 &clk125 &clk125>;
+	clock-names = "pclk", "hclk", "tx_clk";
 };
 
 &gpio {
@@ -169,23 +186,23 @@
 };
 
 &sata {
-	clocks = <&zynqmp_clk SATA_REF>;
+	clocks = <&clk250>;
 };
 
 &sdhci0 {
-	clocks = <&zynqmp_clk SDIO0_REF>, <&zynqmp_clk LPD_LSBUS>;
+	clocks = <&clk200 &clk200>;
 };
 
 &sdhci1 {
-	clocks = <&zynqmp_clk SDIO1_REF>, <&zynqmp_clk LPD_LSBUS>;
+	clocks = <&clk200 &clk200>;
 };
 
 &spi0 {
-	clocks = <&zynqmp_clk SPI0_REF>, <&zynqmp_clk LPD_LSBUS>;
+	clocks = <&clk200 &clk200>;
 };
 
 &spi1 {
-	clocks = <&zynqmp_clk SPI1_REF>, <&zynqmp_clk LPD_LSBUS>;
+	clocks = <&clk200 &clk200>;
 };
 
 &ttc0 {
@@ -205,11 +222,11 @@
 };
 
 &uart0 {
-	clocks = <&zynqmp_clk UART0_REF>, <&zynqmp_clk LPD_LSBUS>;
+	clocks = <&clk100>, <&clk100>;
 };
 
 &uart1 {
-	clocks = <&zynqmp_clk UART1_REF>, <&zynqmp_clk LPD_LSBUS>;
+	clocks = <&clk100>, <&clk100>;
 };
 
 &usb0 {
