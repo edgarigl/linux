@@ -1,0 +1,82 @@
+/ {
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <1>;
+
+		xen,xen-bootargs = "console=dtuart dtuart=serial0 dom0_mem=1256M bootscrub=0 maxcpus=1 timer_slop=0";
+		xen,dom0-bootargs = "rdinit=/bin/sh console=hvc0 earlycon=xen earlyprintk=xen maxcpus=1 clk_ignore_unused";
+
+		dom0 {
+			compatible = "xen,linux-zimage", "xen,multiboot-module";
+			reg = <0x0 0x40000000 0x2000000>;
+		};
+
+		initrd@0x04000000 {
+			compatible = "xen,linux-initrd", "multiboot,module";
+			reg = <0x0 0x60000000 0x1000000>;
+		};
+	};
+};
+
+&gic {
+	/* Upstream QEMU has some issue with the aliasing.  */
+	reg = <0x0 0xf9010000 0x10000>,
+	      <0x0 0xf902f000 0x2000>,
+	      <0x0 0xf9040000 0x20000>,
+	      <0x0 0xf906f000 0x2000>;
+};
+
+&smmu {
+	status = "okay";
+	mmu-masters = < &gem0 0x874
+			&gem1 0x875
+			&gem2 0x876
+			&gem3 0x877
+			&pcie 0x4d0>;
+};
+
+&gem0 {
+	#stream-id-cells = <1>;
+};
+
+&gem1 {
+	#stream-id-cells = <1>;
+};
+
+&gem2 {
+	#stream-id-cells = <1>;
+};
+
+&gem3 {
+	#stream-id-cells = <1>;
+};
+
+&pcie {
+	#stream-id-cells = <1>;
+};
+
+&spi0 {
+	#stream-id-cells = <1>;
+};
+
+&spi1 {
+	#stream-id-cells = <1>;
+};
+
+&sata {
+	#stream-id-cells = <1>;
+};
+
+&usb0 {
+	#stream-id-cells = <1>;
+	status = "disabled";
+};
+
+&sdhci0 {
+	#stream-id-cells = <1>;
+};
+
+&sdhci1 {
+	#stream-id-cells = <1>;
+};
+
