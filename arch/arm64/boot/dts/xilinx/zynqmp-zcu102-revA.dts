@@ -706,3 +706,5 @@
 	phy-names = "dp-phy0";
 	phys = <&psgtr 1 PHY_TYPE_DP 0 3>;
 };
+
+#include "xen-overlay.dtsi"
