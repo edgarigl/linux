@@ -1,0 +1,75 @@
+Howto run Xilinx QEMU on ZynqMP builds.
+
+The kernel config example is named config-zynqmp-pcie.
+You should be able to copy it to .config and build the aarch64 kernel.
+
+There are two example run-scripts:
+qemu-run-zynqmp-xilinx.sh	Runs Linux in QEMU with out firmware
+qemu-run-zynqmp-xilinx-xen.sh	Runs Xen + dom0 in QEMU with out firmware
+
+You'll need to edit both scripts to change paths to where you've installed
+or built the Xilinx QEMU.
+
+At the bottom of the arch/arm64/boot/dts/xilinx/zynqmp-zcu102-revA.dts
+file, we include the xen-overlay.dtsi. That should only be done for Xen
+builds. If you want to run Linux only with qemu-run-zynqmp-xilinx.sh,
+you'll need to comment out that line and rebuild the dtb files.
+
+
+ZynqMP and PCIe Requester ID's (Master ID's):
+
+The ZynqMP PCIe controller does not propagate Requester IDs from end-points.
+All PCIe traffic gets tagged with Master ID 0x4d0.
+
+If you need to try multiple PCIe EPs and have the SMMU see different Master
+ID's a few patches are needed:
+
+This limitation can be lifted from the QEMU model by patching QEMU and
+the QEMU hw-dtbs with the following patches:
+diff --git a/include/hw/pci/pci.h b/include/hw/pci/pci.h
+index c1bf7d5356..ba53ce761a 100644
+--- a/include/hw/pci/pci.h
++++ b/include/hw/pci/pci.h
+@@ -787,7 +787,9 @@ static inline AddressSpace *pci_get_address_space(PCIDevice *dev)
+ static inline int pci_dma_rw(PCIDevice *dev, dma_addr_t addr,
+                              void *buf, dma_addr_t len, DMADirection dir)
+ {
+-    dma_memory_rw(pci_get_address_space(dev), addr, buf, len, dir);
++    MemTxAttrs attr = MEMTXATTRS_UNSPECIFIED;
++    attr.requester_id = pci_requester_id(dev);
++    dma_memory_rw_attr(pci_get_address_space(dev), addr, buf, len, dir, attr);
+     return 0;
+ }
+ 
+diff --git a/zynqmp-iou.dtsi b/zynqmp-iou.dtsi
+index 732dda9..61b8be8 100644
+--- a/zynqmp-iou.dtsi
++++ b/zynqmp-iou.dtsi
+@@ -688,7 +688,6 @@ glue(ocm_mem_ctrl_, n): glue(ocm_mem_ctrl_, n)@n {                  
+                        \
+                                        >;
+                        interrupts = < PCIE_Legacy_IRQ_0 PCIE_MSI_IRQ_0 PCIE_MSI_IRQ_1 >;
+                        dma = <&pcie_ingress>;
+-                       memattr = <&pcie_ns_memattr>;
+                };
+ 
+                zynqmp_boot: zynqmp_boot@0 {
+
+
+You'll also need to modify the Xen and Linux device-tree's accordingly:
+
+diff --git a/arch/arm64/boot/dts/xilinx/zynqmp.dtsi b/arch/arm64/boot/dts/xilinx/zynqmp.dtsi
+index 574160e87f16..b93938fc8dd5 100644
+--- a/arch/arm64/boot/dts/xilinx/zynqmp.dtsi
++++ b/arch/arm64/boot/dts/xilinx/zynqmp.dtsi
+@@ -528,7 +528,7 @@ pcie: pcie@fd0e0000 {
+                                        <0x0 0x0 0x0 0x2 &pcie_intc 0x2>,
+                                        <0x0 0x0 0x0 0x3 &pcie_intc 0x3>,
+                                        <0x0 0x0 0x0 0x4 &pcie_intc 0x4>;
+-                       iommu-map = <0x100 &smmu 0x4d0 0x10000>;
++                       iommu-map = <0x0 &smmu 0x0 0x10000>;
+                        pcie_intc: legacy-interrupt-controller {
+                                interrupt-controller;
+                                #address-cells = <0>;
+
+The Xen dts overlay will need a different patch, I guess.
