@@ -92,7 +92,11 @@ static inline void lmac2_ack_interrupt(struct net_local *lp,
 	BUG_ON(r_sr & DMA_SR_IOC_IRQ);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
 static void lmac2_tx_timeout(struct net_device *dev)
+#else
+static void lmac2_tx_timeout(struct net_device *dev, unsigned int txqueue)
+#endif
 {
 	printk("%s: timeout\n", __func__);
 	// TODO: Dump registers, reset everything and start again..
