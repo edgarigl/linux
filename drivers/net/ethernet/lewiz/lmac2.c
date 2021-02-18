@@ -28,6 +28,7 @@
 #include <linux/of_net.h>
 #include <linux/phy.h>
 #include <linux/interrupt.h>
+#include <linux/version.h>
 
 #define DRIVER_NAME		"lmac2"
 #define TX_TIMEOUT		(10 * HZ)	/* Tx timeout is 10 seconds. */
