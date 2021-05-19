@@ -27,7 +27,7 @@ ID's a few patches are needed:
 This limitation can be lifted from the QEMU model by patching QEMU and
 the QEMU hw-dtbs with the following patches:
 diff --git a/include/hw/pci/pci.h b/include/hw/pci/pci.h
-index c1bf7d5356..ba53ce761a 100644
+index c1bf7d5356..2b6b5cff3b 100644
 --- a/include/hw/pci/pci.h
 +++ b/include/hw/pci/pci.h
 @@ -787,7 +787,9 @@ static inline AddressSpace *pci_get_address_space(PCIDevice *dev)
@@ -41,6 +41,22 @@ index c1bf7d5356..ba53ce761a 100644
      return 0;
  }
  
+@@ -828,9 +830,14 @@ PCI_DMA_DEFINE_LDST(q_be, q_be, 64);
+ static inline void *pci_dma_map(PCIDevice *dev, dma_addr_t addr,
+                                 dma_addr_t *plen, DMADirection dir)
+ {
++    MemTxAttrs attr = MEMTXATTRS_UNSPECIFIED;
++    attr.requester_id = pci_requester_id(dev);
++    hwaddr xlen = *plen;
+     void *buf;
+ 
+-    buf = dma_memory_map(pci_get_address_space(dev), addr, plen, dir);
++    buf = address_space_map(pci_get_address_space(dev), addr, &xlen,
++                            dir == DMA_DIRECTION_FROM_DEVICE, attr);
++    *plen = xlen;
+     return buf;
+ }
+
 diff --git a/zynqmp-iou.dtsi b/zynqmp-iou.dtsi
 index 732dda9..61b8be8 100644
 --- a/zynqmp-iou.dtsi
