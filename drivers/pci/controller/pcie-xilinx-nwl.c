@@ -431,7 +431,7 @@ static struct irq_chip nwl_msi_irq_chip = {
 
 static struct msi_domain_info nwl_msi_domain_info = {
 	.flags = (MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
-		  MSI_FLAG_MULTI_PCI_MSI),
+		  MSI_FLAG_MULTI_PCI_MSI | MSI_FLAG_PCI_MSIX),
 	.chip = &nwl_msi_irq_chip,
 };
 #endif
@@ -439,7 +439,7 @@ static struct msi_domain_info nwl_msi_domain_info = {
 static void nwl_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 {
 	struct nwl_pcie *pcie = irq_data_get_irq_chip_data(data);
-	phys_addr_t msi_addr = pcie->phys_pcie_reg_base;
+	phys_addr_t msi_addr = 0xFE440000;
 
 	msg->address_lo = lower_32_bits(msi_addr);
 	msg->address_hi = upper_32_bits(msi_addr);
@@ -605,9 +605,11 @@ static int nwl_pcie_enable_msi(struct nwl_pcie *pcie)
 			  MSII_STATUS_ENABLE, I_MSII_CONTROL);
 
 	/* setup AFI/FPCI range */
+#if 0
 	base = pcie->phys_pcie_reg_base;
 	nwl_bridge_writel(pcie, lower_32_bits(base), I_MSII_BASE_LO);
 	nwl_bridge_writel(pcie, upper_32_bits(base), I_MSII_BASE_HI);
+#endif
 
 	/*
 	 * For high range MSI interrupts: disable, clear any pending,
