@@ -608,6 +608,10 @@
 					<0x0 0x0 0x0 0x3 &pcie_intc 0x3>,
 					<0x0 0x0 0x0 0x4 &pcie_intc 0x4>;
 			iommu-map = <0x100 &smmu 0x4d0 0x10000>;
+/*
+ If you've got a patched QEMU with the Master-ID limitation lifted:
+			iommu-map = <0x0 &smmu 0x0 0x10000>;
+*/
 			pcie_intc: legacy-interrupt-controller {
 				interrupt-controller;
 				#address-cells = <0>;
