@@ -207,7 +207,7 @@ static void virtio_msg_mmio_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id virtio_msg_mmio_match[] = {
-	{ .compatible = "virtio,msg-mmio", },
+	{ .compatible = "virtio,mmio", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, virtio_msg_mmio_match);
@@ -216,7 +216,7 @@ static struct platform_driver virtio_msg_mmio_driver = {
 	.probe		= virtio_msg_mmio_probe,
 	.remove_new	= virtio_msg_mmio_remove,
 	.driver		= {
-		.name	= "virtio-msg-mmio",
+		.name	= "virtio-mmio",
 		.of_match_table	= virtio_msg_mmio_match,
 #ifdef CONFIG_PM_SLEEP
 		.pm	= &virtio_msg_mmio_pm_ops,
