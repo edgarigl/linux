@@ -89,6 +89,9 @@ struct virtio_mmio_device {
 	void __iomem *base;
 	unsigned long version;
 
+    bool indirect_enabled;
+	spinlock_t access_lock;
+
 	/* a list of queues so we can dispatch IRQs */
 	spinlock_t lock;
 	struct list_head virtqueues;
@@ -102,7 +105,170 @@ struct virtio_mmio_vq_info {
 	struct list_head node;
 };
 
+/*
+ * Writing to the VIRTIO_MMIO_ACCESS register will trigger an indirect MMIO
+ * access to the virtio-mmio registers.
+ *
+ * Data layout:
+ * [31]    - rw: READ=0, WRITE=1.
+ * [29:28] - size:   8BIT=0, 16BIT=1, 32BIT=2
+ * [16:0]  - offset: Virtio-mmio offset.
+ *
+ * When reading from this register, you can poll for status. No new transaction
+ * will be triggered.
+ *
+ * Data layout:
+ * [31]    - rw:     READ=0, WRITE=1.
+ * [30]    - status: IDLE=0, BUSY=1
+ * [29:28] - size:   8BIT=0, 16BIT=1, 32BIT=2
+ * [27]    - error:  RETRY=1
+ *                   If the device signals error retry, it means some of it's
+ *                   internal resources to handle the are termporarily fully
+ *                   used and it needs to push back (backpressure). The driver
+ *                   should retry the access.
+ *
+ * [16:0]  - offset: Virtio-mmio offset.
+ */
+#define VIRTIO_MMIO_ACCESS 0x18
+#define VIRTIO_MMIO_ACCESS_WRITE       (1UL << 31)
+#define VIRTIO_MMIO_ACCESS_BUSY        (1UL << 30)
+#define VIRTIO_MMIO_ACCESS_SIZE_SHIFT  28
+#define VIRTIO_MMIO_ACCESS_ERROR_RETRY (1UL << 27)
 
+/*
+ * Transaction data.
+ *
+ * For reads, only valid after ACCESS.BUSY = 0.
+ * For writes, must be written to before writing to ACCESS to initiate
+ * the write.
+ */
+#define VIRTIO_MMIO_ACCESS_DATA 0x1c
+
+static inline uint32_t vm_indirect_access(struct virtio_mmio_device *vm_dev,
+                                          bool is_write, unsigned int size,
+                                          u32 value, volatile void __iomem *addr)
+{
+    unsigned long flags;
+    uint32_t status;
+    uint32_t aw = 0;
+    int sz;
+
+    /* We only support 8, 16 and 32-bit accesses */
+    switch (size) {
+        case 1: sz = 0; break;
+        case 2: sz = 1; break;
+        case 4: sz = 2; break;
+        default:
+            BUG();
+            break;
+    }
+
+    /* Prep access word */
+    aw = addr - vm_dev->base;
+    aw |= sz << VIRTIO_MMIO_ACCESS_SIZE_SHIFT;
+
+    /* From here and on, we can't allow interleaving.  */
+    spin_lock_irqsave(&vm_dev->access_lock, flags);
+    if (is_write) {
+        aw |= VIRTIO_MMIO_ACCESS_WRITE;
+        /* Pre-load data */
+        writel(value, vm_dev->base + VIRTIO_MMIO_ACCESS_DATA);
+    }
+
+    do {
+        /* Issue the access */
+        writel(aw, vm_dev->base + VIRTIO_MMIO_ACCESS);
+
+        /* Wait for readiness */
+        do {
+            status = readl(vm_dev->base + VIRTIO_MMIO_ACCESS);
+        } while (status & VIRTIO_MMIO_ACCESS_BUSY);
+
+        /* Backpressure from device.  */
+        if (status & VIRTIO_MMIO_ACCESS_ERROR_RETRY) {
+            printk("%s: RETRY aw=%x status=%x\n", __func__, aw, status);
+            cpu_relax();
+        }
+    } while (status & VIRTIO_MMIO_ACCESS_ERROR_RETRY);
+
+    if (!is_write) {
+        value = readl(vm_dev->base + VIRTIO_MMIO_ACCESS_DATA);
+    }
+    spin_unlock_irqrestore(&vm_dev->access_lock, flags);
+    return value;
+}
+
+static inline void vm_writeb(struct virtio_mmio_device *vm_dev,
+                             u8 value, volatile void __iomem *addr)
+{
+    if (!vm_dev->indirect_enabled) {
+	    writeb(value, addr);
+        return;
+    }
+    vm_indirect_access(vm_dev, true, sizeof(value), value, addr);
+}
+
+static inline void vm_writew(struct virtio_mmio_device *vm_dev,
+                             u16 value, volatile void __iomem *addr)
+{
+    if (!vm_dev->indirect_enabled) {
+	    writew(value, addr);
+        return;
+    }
+    vm_indirect_access(vm_dev, true, sizeof(value), value, addr);
+}
+
+static inline void vm_writel(struct virtio_mmio_device *vm_dev,
+                             u32 value, volatile void __iomem *addr)
+{
+    /* Optimize some of the ones that are non-blocking.  */
+    unsigned int offset = addr - vm_dev->base;
+
+    if (!vm_dev->indirect_enabled ||
+        offset == VIRTIO_MMIO_INTERRUPT_ACK ||
+        offset == VIRTIO_MMIO_QUEUE_NOTIFY) {
+        writel(value, addr);
+        return;
+    }
+    vm_indirect_access(vm_dev, true, sizeof(value), value, addr);
+}
+
+static inline u32 vm_readb(struct virtio_mmio_device *vm_dev,
+                           const volatile void __iomem *addr)
+{
+    if (!vm_dev->indirect_enabled) {
+	    return readb(addr);
+    }
+
+    return vm_indirect_access(vm_dev, false, 1, 0,
+                              (volatile void __iomem *) addr);
+}
+
+static inline u32 vm_readw(struct virtio_mmio_device *vm_dev,
+                           const volatile void __iomem *addr)
+{
+    if (!vm_dev->indirect_enabled) {
+	    return readw(addr);
+    }
+
+    return vm_indirect_access(vm_dev, false, 2, 0,
+                              (volatile void __iomem *) addr);
+}
+
+static inline u32 vm_readl(struct virtio_mmio_device *vm_dev,
+                           const volatile void __iomem *addr)
+{
+    /* Optimize some of the ones that are non-blocking.  */
+    unsigned int offset = addr - vm_dev->base;
+
+    if (!vm_dev->indirect_enabled
+            || offset == VIRTIO_MMIO_INTERRUPT_STATUS) {
+	    return readl(addr);
+    }
+
+    return vm_indirect_access(vm_dev, false, 4, 0,
+                              (volatile void __iomem *) addr);
+}
 
 /* Configuration interface */
 
@@ -111,12 +277,12 @@ static u64 vm_get_features(struct virtio_device *vdev)
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
 	u64 features;
 
-	writel(1, vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES_SEL);
-	features = readl(vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES);
+	vm_writel(vm_dev, 1, vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES_SEL);
+	features = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES);
 	features <<= 32;
 
-	writel(0, vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES_SEL);
-	features |= readl(vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES);
+	vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES_SEL);
+	features |= vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_DEVICE_FEATURES);
 
 	return features;
 }
@@ -135,12 +301,12 @@ static int vm_finalize_features(struct virtio_device *vdev)
 		return -EINVAL;
 	}
 
-	writel(1, vm_dev->base + VIRTIO_MMIO_DRIVER_FEATURES_SEL);
-	writel((u32)(vdev->features >> 32),
+	vm_writel(vm_dev, 1, vm_dev->base + VIRTIO_MMIO_DRIVER_FEATURES_SEL);
+	vm_writel(vm_dev, (u32)(vdev->features >> 32),
 			vm_dev->base + VIRTIO_MMIO_DRIVER_FEATURES);
 
-	writel(0, vm_dev->base + VIRTIO_MMIO_DRIVER_FEATURES_SEL);
-	writel((u32)vdev->features,
+	vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_DRIVER_FEATURES_SEL);
+	vm_writel(vm_dev, (u32)vdev->features,
 			vm_dev->base + VIRTIO_MMIO_DRIVER_FEATURES);
 
 	return 0;
@@ -160,27 +326,27 @@ static void vm_get(struct virtio_device *vdev, unsigned int offset,
 		int i;
 
 		for (i = 0; i < len; i++)
-			ptr[i] = readb(base + offset + i);
+			ptr[i] = vm_readb(vm_dev, base + offset + i);
 		return;
 	}
 
 	switch (len) {
 	case 1:
-		b = readb(base + offset);
+		b = vm_readb(vm_dev, base + offset);
 		memcpy(buf, &b, sizeof b);
 		break;
 	case 2:
-		w = cpu_to_le16(readw(base + offset));
+		w = cpu_to_le16(vm_readw(vm_dev, base + offset));
 		memcpy(buf, &w, sizeof w);
 		break;
 	case 4:
-		l = cpu_to_le32(readl(base + offset));
+		l = cpu_to_le32(vm_readl(vm_dev, base + offset));
 		memcpy(buf, &l, sizeof l);
 		break;
 	case 8:
-		l = cpu_to_le32(readl(base + offset));
+		l = cpu_to_le32(vm_readl(vm_dev, base + offset));
 		memcpy(buf, &l, sizeof l);
-		l = cpu_to_le32(ioread32(base + offset + sizeof l));
+		l = cpu_to_le32(vm_readl(vm_dev, base + offset + sizeof l));
 		memcpy(buf + sizeof l, &l, sizeof l);
 		break;
 	default:
@@ -202,7 +368,7 @@ static void vm_set(struct virtio_device *vdev, unsigned int offset,
 		int i;
 
 		for (i = 0; i < len; i++)
-			writeb(ptr[i], base + offset + i);
+			vm_writeb(vm_dev, ptr[i], base + offset + i);
 
 		return;
 	}
@@ -210,21 +376,21 @@ static void vm_set(struct virtio_device *vdev, unsigned int offset,
 	switch (len) {
 	case 1:
 		memcpy(&b, buf, sizeof b);
-		writeb(b, base + offset);
+		vm_writeb(vm_dev, b, base + offset);
 		break;
 	case 2:
 		memcpy(&w, buf, sizeof w);
-		writew(le16_to_cpu(w), base + offset);
+		vm_writew(vm_dev, le16_to_cpu(w), base + offset);
 		break;
 	case 4:
 		memcpy(&l, buf, sizeof l);
-		writel(le32_to_cpu(l), base + offset);
+		vm_writel(vm_dev, le32_to_cpu(l), base + offset);
 		break;
 	case 8:
 		memcpy(&l, buf, sizeof l);
-		writel(le32_to_cpu(l), base + offset);
+		vm_writel(vm_dev, le32_to_cpu(l), base + offset);
 		memcpy(&l, buf + sizeof l, sizeof l);
-		writel(le32_to_cpu(l), base + offset + sizeof l);
+		vm_writel(vm_dev, le32_to_cpu(l), base + offset + sizeof l);
 		break;
 	default:
 		BUG();
@@ -238,14 +404,14 @@ static u32 vm_generation(struct virtio_device *vdev)
 	if (vm_dev->version == 1)
 		return 0;
 	else
-		return readl(vm_dev->base + VIRTIO_MMIO_CONFIG_GENERATION);
+		return vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_CONFIG_GENERATION);
 }
 
 static u8 vm_get_status(struct virtio_device *vdev)
 {
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
 
-	return readl(vm_dev->base + VIRTIO_MMIO_STATUS) & 0xff;
+	return vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_STATUS) & 0xff;
 }
 
 static void vm_set_status(struct virtio_device *vdev, u8 status)
@@ -260,7 +426,7 @@ static void vm_set_status(struct virtio_device *vdev, u8 status)
 	 * that the cache coherent memory writes have completed
 	 * before writing to the MMIO region.
 	 */
-	writel(status, vm_dev->base + VIRTIO_MMIO_STATUS);
+	vm_writel(vm_dev, status, vm_dev->base + VIRTIO_MMIO_STATUS);
 }
 
 static void vm_reset(struct virtio_device *vdev)
@@ -268,7 +434,7 @@ static void vm_reset(struct virtio_device *vdev)
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vdev);
 
 	/* 0 status means a reset. */
-	writel(0, vm_dev->base + VIRTIO_MMIO_STATUS);
+	vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_STATUS);
 }
 
 
@@ -282,7 +448,7 @@ static bool vm_notify(struct virtqueue *vq)
 
 	/* We write the queue's selector into the notification register to
 	 * signal the other end */
-	writel(vq->index, vm_dev->base + VIRTIO_MMIO_QUEUE_NOTIFY);
+	vm_writel(vm_dev, vq->index, vm_dev->base + VIRTIO_MMIO_QUEUE_NOTIFY);
 	return true;
 }
 
@@ -291,7 +457,7 @@ static bool vm_notify_with_data(struct virtqueue *vq)
 	struct virtio_mmio_device *vm_dev = to_virtio_mmio_device(vq->vdev);
 	u32 data = vring_notification_data(vq);
 
-	writel(data, vm_dev->base + VIRTIO_MMIO_QUEUE_NOTIFY);
+	vm_writel(vm_dev, data, vm_dev->base + VIRTIO_MMIO_QUEUE_NOTIFY);
 
 	return true;
 }
@@ -306,8 +472,8 @@ static irqreturn_t vm_interrupt(int irq, void *opaque)
 	irqreturn_t ret = IRQ_NONE;
 
 	/* Read and acknowledge interrupts */
-	status = readl(vm_dev->base + VIRTIO_MMIO_INTERRUPT_STATUS);
-	writel(status, vm_dev->base + VIRTIO_MMIO_INTERRUPT_ACK);
+	status = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_INTERRUPT_STATUS);
+	vm_writel(vm_dev, status, vm_dev->base + VIRTIO_MMIO_INTERRUPT_ACK);
 
 	if (unlikely(status & VIRTIO_MMIO_INT_CONFIG)) {
 		virtio_config_changed(&vm_dev->vdev);
@@ -338,12 +504,12 @@ static void vm_del_vq(struct virtqueue *vq)
 	spin_unlock_irqrestore(&vm_dev->lock, flags);
 
 	/* Select and deactivate the queue */
-	writel(index, vm_dev->base + VIRTIO_MMIO_QUEUE_SEL);
+	vm_writel(vm_dev, index, vm_dev->base + VIRTIO_MMIO_QUEUE_SEL);
 	if (vm_dev->version == 1) {
-		writel(0, vm_dev->base + VIRTIO_MMIO_QUEUE_PFN);
+		vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_QUEUE_PFN);
 	} else {
-		writel(0, vm_dev->base + VIRTIO_MMIO_QUEUE_READY);
-		WARN_ON(readl(vm_dev->base + VIRTIO_MMIO_QUEUE_READY));
+		vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_QUEUE_READY);
+		WARN_ON(vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_QUEUE_READY));
 	}
 
 	vring_del_virtqueue(vq);
@@ -390,10 +556,10 @@ static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned int in
 		return NULL;
 
 	/* Select the queue we're interested in */
-	writel(index, vm_dev->base + VIRTIO_MMIO_QUEUE_SEL);
+	vm_writel(vm_dev, index, vm_dev->base + VIRTIO_MMIO_QUEUE_SEL);
 
 	/* Queue shouldn't already be set up. */
-	if (readl(vm_dev->base + (vm_dev->version == 1 ?
+	if (vm_readl(vm_dev, vm_dev->base + (vm_dev->version == 1 ?
 			VIRTIO_MMIO_QUEUE_PFN : VIRTIO_MMIO_QUEUE_READY))) {
 		err = -ENOENT;
 		goto error_available;
@@ -406,7 +572,7 @@ static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned int in
 		goto error_kmalloc;
 	}
 
-	num = readl(vm_dev->base + VIRTIO_MMIO_QUEUE_NUM_MAX);
+	num = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_QUEUE_NUM_MAX);
 	if (num == 0) {
 		err = -ENOENT;
 		goto error_new_virtqueue;
@@ -423,7 +589,7 @@ static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned int in
 	vq->num_max = num;
 
 	/* Activate the queue */
-	writel(virtqueue_get_vring_size(vq), vm_dev->base + VIRTIO_MMIO_QUEUE_NUM);
+	vm_writel(vm_dev, virtqueue_get_vring_size(vq), vm_dev->base + VIRTIO_MMIO_QUEUE_NUM);
 	if (vm_dev->version == 1) {
 		u64 q_pfn = virtqueue_get_desc_addr(vq) >> PAGE_SHIFT;
 
@@ -440,27 +606,27 @@ static struct virtqueue *vm_setup_vq(struct virtio_device *vdev, unsigned int in
 			goto error_bad_pfn;
 		}
 
-		writel(PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_QUEUE_ALIGN);
-		writel(q_pfn, vm_dev->base + VIRTIO_MMIO_QUEUE_PFN);
+		vm_writel(vm_dev, PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_QUEUE_ALIGN);
+		vm_writel(vm_dev, q_pfn, vm_dev->base + VIRTIO_MMIO_QUEUE_PFN);
 	} else {
 		u64 addr;
 
 		addr = virtqueue_get_desc_addr(vq);
-		writel((u32)addr, vm_dev->base + VIRTIO_MMIO_QUEUE_DESC_LOW);
-		writel((u32)(addr >> 32),
+		vm_writel(vm_dev, (u32)addr, vm_dev->base + VIRTIO_MMIO_QUEUE_DESC_LOW);
+		vm_writel(vm_dev, (u32)(addr >> 32),
 				vm_dev->base + VIRTIO_MMIO_QUEUE_DESC_HIGH);
 
 		addr = virtqueue_get_avail_addr(vq);
-		writel((u32)addr, vm_dev->base + VIRTIO_MMIO_QUEUE_AVAIL_LOW);
-		writel((u32)(addr >> 32),
+		vm_writel(vm_dev, (u32)addr, vm_dev->base + VIRTIO_MMIO_QUEUE_AVAIL_LOW);
+		vm_writel(vm_dev, (u32)(addr >> 32),
 				vm_dev->base + VIRTIO_MMIO_QUEUE_AVAIL_HIGH);
 
 		addr = virtqueue_get_used_addr(vq);
-		writel((u32)addr, vm_dev->base + VIRTIO_MMIO_QUEUE_USED_LOW);
-		writel((u32)(addr >> 32),
+		vm_writel(vm_dev, (u32)addr, vm_dev->base + VIRTIO_MMIO_QUEUE_USED_LOW);
+		vm_writel(vm_dev, (u32)(addr >> 32),
 				vm_dev->base + VIRTIO_MMIO_QUEUE_USED_HIGH);
 
-		writel(1, vm_dev->base + VIRTIO_MMIO_QUEUE_READY);
+		vm_writel(vm_dev, 1, vm_dev->base + VIRTIO_MMIO_QUEUE_READY);
 	}
 
 	vq->priv = info;
@@ -476,10 +642,10 @@ error_bad_pfn:
 	vring_del_virtqueue(vq);
 error_new_virtqueue:
 	if (vm_dev->version == 1) {
-		writel(0, vm_dev->base + VIRTIO_MMIO_QUEUE_PFN);
+		vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_QUEUE_PFN);
 	} else {
-		writel(0, vm_dev->base + VIRTIO_MMIO_QUEUE_READY);
-		WARN_ON(readl(vm_dev->base + VIRTIO_MMIO_QUEUE_READY));
+		vm_writel(vm_dev, 0, vm_dev->base + VIRTIO_MMIO_QUEUE_READY);
+		WARN_ON(vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_QUEUE_READY));
 	}
 	kfree(info);
 error_kmalloc:
@@ -540,11 +706,11 @@ static bool vm_get_shm_region(struct virtio_device *vdev,
 	u64 len, addr;
 
 	/* Select the region we're interested in */
-	writel(id, vm_dev->base + VIRTIO_MMIO_SHM_SEL);
+	vm_writel(vm_dev, id, vm_dev->base + VIRTIO_MMIO_SHM_SEL);
 
 	/* Read the region size */
-	len = (u64) readl(vm_dev->base + VIRTIO_MMIO_SHM_LEN_LOW);
-	len |= (u64) readl(vm_dev->base + VIRTIO_MMIO_SHM_LEN_HIGH) << 32;
+	len = (u64) vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_SHM_LEN_LOW);
+	len |= (u64) vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_SHM_LEN_HIGH) << 32;
 
 	region->len = len;
 
@@ -555,8 +721,8 @@ static bool vm_get_shm_region(struct virtio_device *vdev,
 		return false;
 
 	/* Read the region base address */
-	addr = (u64) readl(vm_dev->base + VIRTIO_MMIO_SHM_BASE_LOW);
-	addr |= (u64) readl(vm_dev->base + VIRTIO_MMIO_SHM_BASE_HIGH) << 32;
+	addr = (u64) vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_SHM_BASE_LOW);
+	addr |= (u64) vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_SHM_BASE_HIGH) << 32;
 
 	region->addr = addr;
 
@@ -592,7 +758,7 @@ static int virtio_mmio_restore(struct device *dev)
 	struct virtio_mmio_device *vm_dev = dev_get_drvdata(dev);
 
 	if (vm_dev->version == 1)
-		writel(PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_GUEST_PAGE_SIZE);
+		vm_writel(vm_dev, PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_GUEST_PAGE_SIZE);
 
 	return virtio_device_restore(&vm_dev->vdev);
 }
@@ -629,6 +795,7 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 	vm_dev->pdev = pdev;
 	INIT_LIST_HEAD(&vm_dev->virtqueues);
 	spin_lock_init(&vm_dev->lock);
+	spin_lock_init(&vm_dev->access_lock);
 
 	vm_dev->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(vm_dev->base)) {
@@ -637,7 +804,7 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 	}
 
 	/* Check magic value */
-	magic = readl(vm_dev->base + VIRTIO_MMIO_MAGIC_VALUE);
+	magic = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_MAGIC_VALUE);
 	if (magic != ('v' | 'i' << 8 | 'r' << 16 | 't' << 24)) {
 		dev_warn(&pdev->dev, "Wrong magic value 0x%08lx!\n", magic);
 		rc = -ENODEV;
@@ -645,15 +812,19 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 	}
 
 	/* Check device version */
-	vm_dev->version = readl(vm_dev->base + VIRTIO_MMIO_VERSION);
-	if (vm_dev->version < 1 || vm_dev->version > 2) {
+	vm_dev->version = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_VERSION);
+	if (vm_dev->version < 1 || vm_dev->version > 3) {
 		dev_err(&pdev->dev, "Version %ld not supported!\n",
 				vm_dev->version);
 		rc = -ENXIO;
 		goto free_vm_dev;
 	}
 
-	vm_dev->vdev.id.device = readl(vm_dev->base + VIRTIO_MMIO_DEVICE_ID);
+    if (vm_dev->version == 3) {
+        vm_dev->indirect_enabled = true;
+    }
+
+	vm_dev->vdev.id.device = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_DEVICE_ID);
 	if (vm_dev->vdev.id.device == 0) {
 		/*
 		 * virtio-mmio device with an ID 0 is a (dummy) placeholder
@@ -662,10 +833,10 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 		rc = -ENODEV;
 		goto free_vm_dev;
 	}
-	vm_dev->vdev.id.vendor = readl(vm_dev->base + VIRTIO_MMIO_VENDOR_ID);
+	vm_dev->vdev.id.vendor = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_VENDOR_ID);
 
 	if (vm_dev->version == 1) {
-		writel(PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_GUEST_PAGE_SIZE);
+		vm_writel(vm_dev, PAGE_SIZE, vm_dev->base + VIRTIO_MMIO_GUEST_PAGE_SIZE);
 
 		rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(64));
 		/*
