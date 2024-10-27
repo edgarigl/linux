@@ -48,6 +48,9 @@ struct virtio_msg_device {
 	struct virtio_msg_ops *ops;
 	const void *data;
 
+	/* device id on the virtio-msg-bus */
+	u16 dev_id;
+
 	/* a list of queues so we can dispatch IRQs */
 	spinlock_t lock;
 	struct list_head virtqueues;
