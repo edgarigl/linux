@@ -389,7 +389,7 @@ static struct virtqueue *vmsg_setup_vq(struct virtio_msg_device *vmdev,
 	/* Send virtqueue configuration to the device */
 	virtio_request_prepare(&request, VIRTIO_MSG_SET_VQUEUE, vmdev->dev_id);
 	request.set_vqueue.index = cpu_to_le32(index);
-	request.set_vqueue.size = cpu_to_le64(virtqueue_get_vring_size(vq));
+	request.set_vqueue.size = cpu_to_le32(virtqueue_get_vring_size(vq));
 	request.set_vqueue.descriptor_addr = cpu_to_le64(virtqueue_get_desc_addr(vq));
 	request.set_vqueue.driver_addr = cpu_to_le64(virtqueue_get_avail_addr(vq));
 	request.set_vqueue.device_addr = cpu_to_le64(virtqueue_get_used_addr(vq));

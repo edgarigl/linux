@@ -116,7 +116,7 @@ struct get_vqueue_resp {
 
 struct set_vqueue {
 	__le32 index;
-	__le64 size;
+	__le32 size;
 	__le64 descriptor_addr;
 	__le64 driver_addr;
 	__le64 device_addr;
