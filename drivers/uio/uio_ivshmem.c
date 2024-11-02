@@ -163,7 +163,7 @@ static int ivshm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 error_irq:
-	while (--i > 0)
+	while (--i >= 0)
 		free_irq(pci_irq_vector(pdev, i), ivshm_dev);
 	pci_free_irq_vectors(pdev);
 
