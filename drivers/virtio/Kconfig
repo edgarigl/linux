@@ -195,6 +195,16 @@ config VIRTIO_MSG_MMIO
 
 	 If unsure, say N.
 
+config VIRTIO_MSG_IVSHMEM
+	tristate "Virtio-msg support for the ivshmem pci device"
+	select VIRTIO_MSG_AMP
+	help
+	 This provides support for using virtio-msg on top of a ivshmem
+	 pci device.  This device can be provided by QEMU or directly by some
+	 hypervisors. This driver uses the virtio-msg-amp model
+
+	 If unsure, say N.
+
 config VIRTIO_DMA_SHARED_BUFFER
 	tristate
 	depends on DMA_SHARED_BUFFER

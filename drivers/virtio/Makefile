@@ -7,6 +7,7 @@ obj-$(CONFIG_VIRTIO_MMIO) += virtio_mmio.o
 obj-$(CONFIG_VIRTIO_MSG) += virtio_msg.o
 obj-$(CONFIG_VIRTIO_MSG_MMIO) += virtio_msg_mmio.o
 obj-$(CONFIG_VIRTIO_MSG_AMP) += virtio_msg_amp.o
+obj-$(CONFIG_VIRTIO_MSG_IVSHMEM) += virtio_msg_ivshmem.o
 obj-$(CONFIG_VIRTIO_PCI) += virtio_pci.o
 virtio_pci-y := virtio_pci_modern.o virtio_pci_common.o
 virtio_pci-$(CONFIG_VIRTIO_PCI_LEGACY) += virtio_pci_legacy.o
