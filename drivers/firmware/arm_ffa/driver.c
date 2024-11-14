@@ -1702,6 +1702,16 @@ static void ffa_partitions_cleanup(void)
 	xa_destroy(&drv_info->partition_info);
 }
 
+static void hack_override_uuid(struct ffa_partition_info *buf)
+{
+	unsigned int *addr = (void *)&buf->uuid;
+
+	addr[0] = 0xb52860c6;
+	addr[1] = 0xa14a9824;
+	addr[2] = 0xda77e79d;
+	addr[3] = 0xf0ab2261;
+}
+
 static int ffa_scan_partitions(void)
 {
 	int count, idx;
@@ -1715,6 +1725,9 @@ static int ffa_scan_partitions(void)
 	}
 
 	for (idx = 0, tpbuf = pbuf; idx < count; idx++, tpbuf++) {
+		if (drv_info->vm_id != tpbuf->id)
+			hack_override_uuid(tpbuf);
+
 		/* Note that if the UUID will be uuid_null, that will require
 		 * ffa_bus_notifier() to find the UUID of this partition id
 		 * with help of ffa_device_match_uuid(). FF-A v1.1 and above
