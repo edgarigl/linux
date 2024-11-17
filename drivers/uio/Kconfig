@@ -189,6 +189,15 @@ config UIO_XILINX_AI_ENGINE
 	  hardware, as well as for the memory allocation.
 	  Say 'y' only for platforms with the AI Engine IP.
 
+config UIO_XILINX_VERSAL_VIRTIO_MSG
+	tristate "Xilinx Versal virtio-msg UIO driver"
+	select UIO_DMEM_GENIRQ
+	select UIO_PDRV_GENIRQ
+	help
+	  UIO driver for Versal in PCI end-point mode, used to map host memory
+	  and to trigger and receive interrupts to/from the host. This driver
+	  is used by tools like QEMU to implement the virtio-msg transport.
+
 config UIO_DFL
 	tristate "Generic driver for DFL (Device Feature List) bus"
 	depends on FPGA_DFL
