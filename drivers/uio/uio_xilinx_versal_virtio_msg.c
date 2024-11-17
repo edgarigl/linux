@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * drivers/uio/uio_dmem_genirq.c
+ * drivers/uio/uio_xilinx_versal_virtio_msg.c
  *
- * Userspace I/O platform driver with generic IRQ handling code.
+ * Copyright (C) 2024 Advanced Micro Devices, Inc.
  *
- * Copyright (C) 2012 Damian Hobson-Garcia
- *
- * Based on uio_pdrv_genirq.c by Magnus Damm
  */
 
 #include <linux/platform_device.h>
@@ -26,7 +23,7 @@
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
 
-#define DRIVER_NAME "uio_dmem_genirq"
+#define DRIVER_NAME "uio_xilinx_versal_virtio_msg"
 #define DMEM_MAP_ERROR (~0)
 
 struct uio_dmem_genirq_platdata {
@@ -112,6 +109,59 @@ static void uio_dmem_genirq_pm_disable(void *data)
 	pm_runtime_disable(dev);
 }
 
+static int xilinx_vmsg_mem_index(struct uio_info *info,
+                                 struct vm_area_struct *vma)
+{
+        if (vma->vm_pgoff < MAX_UIO_MAPS) {
+                if (info->mem[vma->vm_pgoff].size == 0)
+                        return -1;
+                return (int)vma->vm_pgoff;
+        }
+        return -1;
+}
+
+static const struct vm_operations_struct xilinx_vmsg_vm_ops = {
+#ifdef CONFIG_HAVE_IOREMAP_PROT
+        .access = generic_access_phys,
+#endif
+};
+
+static int xilinx_vmsg_mmap(struct uio_info *info,
+                            struct vm_area_struct *vma)
+{
+        int mi = xilinx_vmsg_mem_index(info, vma);
+        struct uio_mem *mem;
+
+        if (mi < 0)
+                return -EINVAL;
+        mem = info->mem + mi;
+
+        if (mem->addr & ~PAGE_MASK)
+                return -ENODEV;
+        if (vma->vm_end - vma->vm_start > mem->size)
+                return -EINVAL;
+
+        vma->vm_ops = &xilinx_vmsg_vm_ops;
+        /* Regions are mapped as Normal Memory, Non-Cached.  */
+        vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+
+        /*
+         * We cannot use the vm_iomap_memory() helper here,
+         * because vma->vm_pgoff is the map index we looked
+         * up above in uio_find_mem_index(), rather than an
+         * actual page offset into the mmap.
+         *
+         * So we just do the physical mmap without a page
+         * offset.
+         */
+        return remap_pfn_range(vma,
+                               vma->vm_start,
+                               mem->addr >> PAGE_SHIFT,
+                               vma->vm_end - vma->vm_start,
+                               vma->vm_page_prot);
+}
+
+
 static int uio_dmem_genirq_probe(struct platform_device *pdev)
 {
 	struct uio_dmem_genirq_pdata *pdata = dev_get_platdata(&pdev->dev);
@@ -132,6 +182,7 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 		uioinfo->name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%pOFn",
 					       pdev->dev.of_node);
 		uioinfo->version = "devicetree";
+        uioinfo->mmap = xilinx_vmsg_mmap;
 	}
 
 	printk("%s:%d\n", __func__, __LINE__);

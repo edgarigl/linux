@@ -782,10 +782,8 @@ static int uio_mmap_physical(struct vm_area_struct *vma)
 		return -EINVAL;
 
 	vma->vm_ops = &uio_physical_vm_ops;
-	if (idev->info->mem[mi].memtype == UIO_MEM_PHYS) {
-		//vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	}
+	if (idev->info->mem[mi].memtype == UIO_MEM_PHYS)
+		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	/*
 	 * We cannot use the vm_iomap_memory() helper here,
