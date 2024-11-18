@@ -205,6 +205,15 @@ config VIRTIO_MSG_IVSHMEM
 
 	 If unsure, say N.
 
+config VIRTIO_MSG_SAPPHIRE
+	tristate "Virtio-msg support for the sapphire host with VEK280 pci device"
+	select VIRTIO_MSG_AMP
+	help
+	 This provides support for using virtio-msg on top of a sapphire host with
+	 a VEK280 pci device.
+
+	 If unsure, say N.
+
 config VIRTIO_DMA_SHARED_BUFFER
 	tristate
 	depends on DMA_SHARED_BUFFER
