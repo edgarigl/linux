@@ -56,13 +56,13 @@ static int virtio_msg_amp_send(struct virtio_msg_device *vmdev,
 			return -2;
 		}
 
-		dev_info(pdev, "send w/ resp dev_id=%d type/id=%04x\n",
+		dev_dbg(pdev, "send w/ resp dev_id=%d type/id=%04x\n",
 			vmadev->dev_id, match);
 		vmadev->response = response;
 		vmadev->expected_response = match;
 		reinit_completion(&vmadev->response_done);
 	} else {
-		dev_info(pdev, "send only dev_id=%d type/id=%04x\n",
+		dev_dbg(pdev, "send only dev_id=%d type/id=%04x\n",
 			vmadev->dev_id, match);
 	}
 
@@ -75,7 +75,7 @@ static int virtio_msg_amp_send(struct virtio_msg_device *vmdev,
 			  vmadev->dev_id, match);
 			rc = -2;
 		} else {
-			dev_info(pdev,
+			dev_dbg(pdev,
 			  "send response complete dev_id=%d, type/id=%04x\n",
 			  vmadev->dev_id, match);
 		}
@@ -220,7 +220,7 @@ static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 	int err;
 
 	while (spsc_recv(&amp_dev->dev2drv, buf, 64)) {
-		dev_info(pdev, "RX MSG: %40ph \n", buf);
+		dev_dbg(pdev, "RX MSG: %40ph \n", buf);
 		msg = (struct virtio_msg*) buf;
 		dev_id =  le16_to_cpu(msg->dev_id);
 		if ((vmadev = amp_find_dev(amp_dev, dev_id))) {
@@ -246,7 +246,7 @@ static void tx_msg(struct virtio_msg_amp *amp_dev, void* msg_buf,
 	size_t msg_len) {
 	struct device *pdev = amp_dev->ops->get_device(amp_dev);
 
-	dev_info(pdev, "TX MSG: %40ph \n", msg_buf);
+	dev_dbg(pdev, "TX MSG: %40ph \n", msg_buf);
 
 	/* queue a message */
 	while ( ! spsc_send(&amp_dev->drv2dev, msg_buf, msg_len) ) {
