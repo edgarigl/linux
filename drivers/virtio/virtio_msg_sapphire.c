@@ -113,7 +113,7 @@ static enum hrtimer_restart sapphire_poll_timer_expired(struct hrtimer *hrtimer)
 		        container_of(hrtimer, struct sapphire_dev, poll_timer);
         int err;
 
-        if (sapphire_dev->probed_ok) {
+        if (sapphire_dev->probed_ok && 0) {
             printk("STOP polled notifications\n");
             return HRTIMER_NORESTART;
         }
