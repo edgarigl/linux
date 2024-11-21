@@ -231,11 +231,11 @@ static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 				if (!err)
 					expected = true;
 				else
-					dev_err(pdev, "vm rx err=%d", err);
+					dev_dbg(pdev, "vm rx err=%d", err);
 			}
 		}
 		if (!expected) {
-			dev_err(pdev,
+			dev_dbg(pdev,
 				"Unexpected msg dev_id=%d, type/id=%02x/%02x\n",
 				msg->dev_id, msg->type, msg->id);
 		}
