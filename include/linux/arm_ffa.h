@@ -124,9 +124,13 @@
  * Minimum buffer size/alignment encodings returned by an FFA_FEATURES
  * query for FFA_RXTX_MAP.
  */
+#define FFA_FEAT_RXTX_MIN_SZ_MASK	GENMASK(1, 0)
 #define FFA_FEAT_RXTX_MIN_SZ_4K		0
 #define FFA_FEAT_RXTX_MIN_SZ_64K	1
 #define FFA_FEAT_RXTX_MIN_SZ_16K	2
+
+#define FFA_FEAT_RXTX_MAX_SZ_MASK	GENMASK(31, 16)
+#define FFA_FEAT_RXTX_MAX_SZ(x)		((u16)(FIELD_GET(FFA_FEAT_RXTX_MAX_SZ_MASK, (x))))
 
 /* FFA Bus/Device/Driver related */
 struct ffa_device {
