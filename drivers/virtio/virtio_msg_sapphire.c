@@ -23,6 +23,7 @@ struct sapphire_regs {
 struct sapphire_dev {
 	struct virtio_msg_amp amp_dev;
 	struct pci_dev *pdev;
+	uint32_t __iomem *cfg_bram;
 	struct sapphire_regs __iomem *regs;
     struct hrtimer poll_timer; /* Broken MSI.  */
 
@@ -159,7 +160,7 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto error;
 	}
 
-	err = pcim_iomap_regions(pdev, BIT(2), device_name);
+	err = pcim_iomap_regions(pdev, BIT(1) | BIT(2), device_name);
 	if (err) {
 		goto error;
 	}
@@ -179,6 +180,7 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	size = pci_resource_len(pdev, 2);
 	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
 
+	sapphire_dev->cfg_bram  = pcim_iomap_table(pdev)[1];
 	sapphire_dev->regs  = pcim_iomap_table(pdev)[2];
 
 	/*
@@ -220,6 +222,12 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
             sapphire_dev->shmem_dma);
 
 	dev_info(&pdev->dev, "SHMEM @ 0: %32ph \n", sapphire_dev->amp_dev.shmem);
+
+    addr = sapphire_dev->shmem_dma;
+    sapphire_dev->cfg_bram[0x4000/4 + 1] = addr;
+    sapphire_dev->cfg_bram[0x4000/4 + 2] = addr >> 32;
+    smp_wmb();
+    sapphire_dev->cfg_bram[0x4000/4 + 0] = 1;
 
     hrtimer_init(&sapphire_dev->poll_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     sapphire_dev->poll_timer.function = sapphire_poll_timer_expired;
