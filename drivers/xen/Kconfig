@@ -342,6 +342,14 @@ config XEN_UNPOPULATED_ALLOC
 	  having to balloon out RAM regions in order to obtain physical memory
 	  space to create such mappings.
 
+config XEN_VIRT2GFN
+	tristate "Xen virt2gfn"
+	default m
+	help
+	  Enable support for a virt to gfn mapper.
+
+	  If in doubt, say n.
+
 config XEN_GRANT_DMA_IOMMU
 	bool
 	select IOMMU_API
