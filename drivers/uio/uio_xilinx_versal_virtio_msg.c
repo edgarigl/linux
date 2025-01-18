@@ -171,7 +171,6 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 	int ret = -EINVAL;
 	int i;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	if (pdev->dev.of_node) {
 		/* alloc uioinfo for one device */
 		uioinfo = devm_kzalloc(&pdev->dev, sizeof(*uioinfo), GFP_KERNEL);
@@ -185,40 +184,34 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
         uioinfo->mmap = xilinx_vmsg_mmap;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	if (!uioinfo || !uioinfo->name || !uioinfo->version) {
 		dev_err(&pdev->dev, "missing platform_data\n");
 		return -EINVAL;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	if (uioinfo->handler || uioinfo->irqcontrol ||
 	    uioinfo->irq_flags & IRQF_SHARED) {
 		dev_err(&pdev->dev, "interrupt configuration error\n");
 		return -EINVAL;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv) {
 		dev_err(&pdev->dev, "unable to kmalloc\n");
 		return -ENOMEM;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret) {
 		dev_err(&pdev->dev, "DMA enable failed\n");
 		return ret;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	priv->uioinfo = uioinfo;
 	spin_lock_init(&priv->lock);
 	priv->flags = 0; /* interrupt is enabled to begin with */
 	priv->pdev = pdev;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	if (!uioinfo->irq) {
 		/* Multiple IRQs are not supported */
 		ret = platform_get_irq(pdev, 0);
@@ -229,7 +222,6 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 		uioinfo->irq = ret;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	if (uioinfo->irq) {
 		struct irq_data *irq_data = irq_get_irq_data(uioinfo->irq);
 
@@ -247,10 +239,8 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 		}
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	uiomem = &uioinfo->mem[0];
 
-	printk("%s:%d\n", __func__, __LINE__);
 	for (i = 0; i < pdev->num_resources; ++i) {
 		struct resource *r = &pdev->resource[i];
 
@@ -272,7 +262,6 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 		++uiomem;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	while (uiomem < &uioinfo->mem[MAX_UIO_MAPS]) {
 		uiomem->size = 0;
 		++uiomem;
@@ -287,7 +276,6 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 	 * Interrupt sharing is not supported.
 	 */
 
-	printk("%s:%d\n", __func__, __LINE__);
 	uioinfo->handler = uio_dmem_genirq_handler;
 	uioinfo->irqcontrol = uio_dmem_genirq_irqcontrol;
 	uioinfo->open = uio_dmem_genirq_open;
@@ -301,12 +289,10 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 	 */
 	pm_runtime_enable(&pdev->dev);
 
-	printk("%s:%d\n", __func__, __LINE__);
 	ret = devm_add_action_or_reset(&pdev->dev, uio_dmem_genirq_pm_disable, &pdev->dev);
 	if (ret)
 		return ret;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	return devm_uio_register_device(&pdev->dev, priv->uioinfo);
 }
 
