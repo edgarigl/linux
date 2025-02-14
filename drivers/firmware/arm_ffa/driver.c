@@ -111,6 +111,12 @@ struct ffa_drv_info {
 	struct xarray partition_info;
 	DECLARE_HASHTABLE(notifier_hash, ilog2(FFA_MAX_NOTIFICATIONS));
 	rwlock_t notify_lock; /* lock to protect notifier hashtable  */
+
+	/* Fields corresponding to backend side implementation */
+	struct work_struct scan_partition_work;
+	void *pending_buf;
+	int pending_sender_id;
+	uuid_t pending_uuid;
 };
 
 static struct ffa_drv_info *drv_info;
@@ -1451,6 +1457,19 @@ static void handle_fwk_notif_callbacks(u32 bitmap)
 	cb_info = notifier_hnode_get_by_vmid_uuid(notify_id, target, &uuid);
 	read_unlock(&drv_info->notify_lock);
 
+	/*
+	 * The partition came online after this one, scan partitions again and
+	 * pass the buffer.
+	 */
+	if (!cb_info) {
+		drv_info->pending_buf = buf;
+		drv_info->pending_sender_id = target;
+		uuid_copy(&drv_info->pending_uuid, &uuid);
+
+		queue_work(drv_info->notif_pcpu_wq, &drv_info->scan_partition_work);
+		return;
+	}
+
 	if (cb_info && cb_info->fwk_cb)
 		cb_info->fwk_cb(notify_id, cb_info->cb_data, buf);
 	kfree(buf);
@@ -1683,25 +1702,18 @@ static void ffa_partitions_cleanup(void)
 	xa_destroy(&drv_info->partition_info);
 }
 
-static int ffa_setup_partitions(void)
+static int ffa_scan_partitions(void)
 {
-	int count, idx, ret;
+	int count, idx;
 	struct ffa_device *ffa_dev;
 	struct ffa_partition_info *pbuf, *tpbuf;
-
-	if (drv_info->version == FFA_VERSION_1_0) {
-		ret = bus_register_notifier(&ffa_bus_type, &ffa_bus_nb);
-		if (ret)
-			pr_err("Failed to register FF-A bus notifiers\n");
-	}
 
 	count = ffa_partition_probe(&uuid_null, &pbuf);
 	if (count <= 0) {
 		pr_info("%s: No partitions found, error %d\n", __func__, count);
-		return -EINVAL;
+		return 0;
 	}
 
-	xa_init(&drv_info->partition_info);
 	for (idx = 0, tpbuf = pbuf; idx < count; idx++, tpbuf++) {
 		/* Note that if the UUID will be uuid_null, that will require
 		 * ffa_bus_notifier() to find the UUID of this partition id
@@ -1727,6 +1739,43 @@ static int ffa_setup_partitions(void)
 	}
 
 	kfree(pbuf);
+
+	return 0;
+}
+
+static void scan_partition_work_fn(struct work_struct *work)
+{
+	struct ffa_drv_info *drv_info = container_of(work, struct ffa_drv_info,
+			scan_partition_work);
+	struct notifier_cb_info *cb_info;
+	int notify_id = 0;
+
+	ffa_scan_partitions();
+
+	/* The partition must be present now, raise the pending notification */
+	write_lock(&drv_info->notify_lock);
+	cb_info = notifier_hnode_get_by_vmid_uuid(notify_id, drv_info->pending_sender_id, &drv_info->pending_uuid);
+	write_unlock(&drv_info->notify_lock);
+
+	if (cb_info && cb_info->fwk_cb)
+		cb_info->fwk_cb(notify_id, cb_info->cb_data, drv_info->pending_buf);
+
+	kfree(drv_info->pending_buf);
+	drv_info->pending_buf = NULL;
+}
+
+static int ffa_setup_partitions(void)
+{
+	int ret;
+
+	if (drv_info->version == FFA_VERSION_1_0) {
+		ret = bus_register_notifier(&ffa_bus_type, &ffa_bus_nb);
+		if (ret)
+			pr_err("Failed to register FF-A bus notifiers\n");
+	}
+
+	xa_init(&drv_info->partition_info);
+	ffa_scan_partitions();
 
 	/*
 	 * Check if the host is already added as part of partition info
@@ -1913,6 +1962,7 @@ static int ffa_init_pcpu_irq(void)
 
 	INIT_WORK(&drv_info->sched_recv_irq_work, ffa_sched_recv_irq_work_fn);
 	INIT_WORK(&drv_info->notif_pcpu_work, notif_pcpu_irq_work_fn);
+	INIT_WORK(&drv_info->scan_partition_work, scan_partition_work_fn);
 	drv_info->notif_pcpu_wq = create_workqueue("ffa_pcpu_irq_notification");
 	if (!drv_info->notif_pcpu_wq)
 		return -EINVAL;
