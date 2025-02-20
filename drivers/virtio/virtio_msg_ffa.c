@@ -12,7 +12,9 @@
 #define pr_fmt(fmt) "virtio-msg-ffa: " fmt
 
 #include <linux/arm_ffa.h>
+#include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/pm.h>
@@ -43,7 +45,9 @@ struct virtio_msg_ffa_device {
 		    struct virtio_msg *request,
 		    struct virtio_msg *response,
 		    struct virtio_msg_indirect_data *idata);
+	struct task_struct *used_event_task;
 	int vmdev_count;
+	u32 features;
 	u16 msg_size;
 };
 
@@ -134,6 +138,38 @@ find_vmdev(struct virtio_msg_ffa_device *vmfdev, u16 dev_id)
 	dev_err(&vmfdev->ffa_dev->dev, "Couldn't find matching vmdev: %d\n",
 		dev_id);
 	return NULL;
+}
+
+static int used_event_task(void *data)
+{
+	struct virtio_msg_ffa_device *vmfdev = data;
+	struct virtio_msg_device *vmdev;
+	u8 buf[VIRTIO_MSG_FFA_BUS_MSG_SIZE];
+	struct virtio_msg *vmsg = (struct virtio_msg *)&buf;
+	struct event_used *payload = virtio_msg_payload(vmsg);
+	struct virtqueue *vq;
+	u32 index;
+	int i;
+
+	virtio_msg_prepare(vmsg, VIRTIO_MSG_EVENT_USED, TOKEN_EVENT,
+			   sizeof(*payload));
+
+	while (!kthread_should_stop()) {
+		for (i = 0; i < vmfdev->vmdev_count; i++) {
+			vmdev = &vmfdev->vmdevs[i].vmdev;
+			index = 0;
+
+			virtio_device_for_each_vq(&vmdev->vdev, vq) {
+				payload->index = cpu_to_le32(index++);
+				virtio_msg_event(vmdev, vmsg);
+			}
+		}
+
+		/* sleep for 1ms */
+		fsleep(1000);
+	}
+
+	return 0;
 }
 
 static void vmsg_ffa_notifier_cb(int notify_id, void *cb_data, void *buf)
@@ -298,6 +334,8 @@ static int vmsg_ffa_bus_version(struct virtio_msg_ffa_device *vmfdev)
 		return -EINVAL;
 	}
 
+	vmfdev->features = features;
+
 	return 0;
 }
 
@@ -424,6 +462,15 @@ static int virtio_msg_ffa_probe(struct ffa_device *ffa_dev)
 		i++;
 	}
 
+	/* Run the kthread if indirect messages aren't supported */
+	if (!(vmfdev->features & VIRTIO_MSG_FFA_FEATURE_INDIRECT_MSG_SUPP)) {
+		vmfdev->used_event_task = kthread_run(used_event_task, vmfdev, "vmsg-ffa-ue");
+		if (IS_ERR(vmfdev->used_event_task)) {
+			ret = PTR_ERR(vmfdev->used_event_task);
+			goto unregister;
+		}
+	}
+
 	return 0;
 
 unregister:
@@ -440,6 +487,7 @@ static void virtio_msg_ffa_remove(struct ffa_device *ffa_dev)
 {
 	struct virtio_msg_ffa_device *vmfdev = ffa_dev->dev.driver_data;
 
+	kthread_stop(vmfdev->used_event_task);
 	remove_vmdevs(vmfdev, vmfdev->vmdev_count);
 
 	if (!IS_ERR(vmfdev->rmem))
