@@ -805,7 +805,11 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 
 	/* Check magic value */
 	magic = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_MAGIC_VALUE);
-	if (magic != ('v' | 'i' << 8 | 'r' << 16 | 't' << 24)) {
+
+	/* Check for non-blocking version of virtio-mmio.  */
+	if (magic == ('v' | 'm' << 8 | 'n' << 16 | 'b' << 24)) {
+		vm_dev->indirect_enabled = true;
+	} else if (magic != ('v' | 'i' << 8 | 'r' << 16 | 't' << 24)) {
 		dev_warn(&pdev->dev, "Wrong magic value 0x%08lx!\n", magic);
 		rc = -ENODEV;
 		goto free_vm_dev;
@@ -819,10 +823,6 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 		rc = -ENXIO;
 		goto free_vm_dev;
 	}
-
-    if (vm_dev->version == 3) {
-        vm_dev->indirect_enabled = true;
-    }
 
 	vm_dev->vdev.id.device = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_DEVICE_ID);
 	if (vm_dev->vdev.id.device == 0) {
