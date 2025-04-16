@@ -225,8 +225,8 @@ static inline void vm_writel(struct virtio_mmio_device *vm_dev,
     unsigned int offset = addr - vm_dev->base;
 
     if (!vm_dev->indirect_enabled ||
-        offset == VIRTIO_MMIO_INTERRUPT_ACK ||
-        offset == VIRTIO_MMIO_QUEUE_NOTIFY) {
+//        offset == VIRTIO_MMIO_QUEUE_NOTIFY ||
+        offset == VIRTIO_MMIO_INTERRUPT_ACK) {
         writel(value, addr);
         return;
     }
