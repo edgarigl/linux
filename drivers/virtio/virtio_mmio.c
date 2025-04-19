@@ -804,7 +804,7 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 	}
 
 	/* Check magic value */
-	magic = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_MAGIC_VALUE);
+	magic = readl(vm_dev->base + VIRTIO_MMIO_MAGIC_VALUE);
 
 	/* Check for non-blocking version of virtio-mmio.  */
 	if (magic == ('v' | 'm' << 8 | 'n' << 16 | 'b' << 24)) {
@@ -816,12 +816,21 @@ static int virtio_mmio_probe(struct platform_device *pdev)
 	}
 
 	/* Check device version */
-	vm_dev->version = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_VERSION);
-	if (vm_dev->version < 1 || vm_dev->version > 3) {
+	vm_dev->version = readl(vm_dev->base + VIRTIO_MMIO_VERSION);
+	if (vm_dev->version < 1 || vm_dev->version > 2) {
 		dev_err(&pdev->dev, "Version %ld not supported!\n",
 				vm_dev->version);
 		rc = -ENXIO;
 		goto free_vm_dev;
+	}
+
+	/* We need to wait for the device backend at this point.  */
+	{
+		u32 status;
+
+		do {
+			status = readl(vm_dev->base + VIRTIO_MMIO_ACCESS);
+		} while (status & VIRTIO_MMIO_ACCESS_BUSY);
 	}
 
 	vm_dev->vdev.id.device = vm_readl(vm_dev, vm_dev->base + VIRTIO_MMIO_DEVICE_ID);
