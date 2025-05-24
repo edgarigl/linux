@@ -9,6 +9,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/clk.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_pci.h>
@@ -16,6 +17,10 @@
 #include <linux/platform_device.h>
 
 #include "pci-host-common.h"
+
+struct pci_generic_host {
+	struct clk *clk;
+};
 
 static void gen_pci_unmap_cfg(void *ptr)
 {
@@ -57,10 +62,26 @@ int pci_host_common_init(struct platform_device *pdev,
 	struct device *dev = &pdev->dev;
 	struct pci_host_bridge *bridge;
 	struct pci_config_window *cfg;
+	struct pci_generic_host *pcie;
 
-	bridge = devm_pci_alloc_host_bridge(dev, 0);
+	bridge = devm_pci_alloc_host_bridge(dev, sizeof(*pcie));
 	if (!bridge)
 		return -ENOMEM;
+
+	pcie = pci_host_bridge_priv(bridge);
+	platform_set_drvdata(pdev, bridge);
+
+	/* Optional clock.  */
+	pcie->clk = devm_clk_get_optional(dev, NULL);
+	if (!IS_ERR(pcie->clk)) {
+		int err;
+
+		err = clk_prepare_enable(pcie->clk);
+		if (err) {
+			dev_err(dev, "can't enable PCIe ref clock\n");
+			return err;
+		}
+	}
 
 	of_pci_check_probe_only();
 
@@ -96,11 +117,14 @@ EXPORT_SYMBOL_GPL(pci_host_common_probe);
 void pci_host_common_remove(struct platform_device *pdev)
 {
 	struct pci_host_bridge *bridge = platform_get_drvdata(pdev);
+	struct pci_generic_host *pcie = pci_host_bridge_priv(bridge);
 
 	pci_lock_rescan_remove();
 	pci_stop_root_bus(bridge->bus);
 	pci_remove_root_bus(bridge->bus);
 	pci_unlock_rescan_remove();
+
+	clk_disable_unprepare(pcie->clk);
 }
 EXPORT_SYMBOL_GPL(pci_host_common_remove);
 
