@@ -228,6 +228,14 @@ config VIRTIO_MSG_SAPPHIRE
 
 	 If unsure, say N.
 
+config VIRTIO_MSG_AMP_PCI
+	tristate "Virtio-msg support for a generic AMP PCI device."
+	select VIRTIO_MSG_AMP
+	help
+	 This provides support for using virtio-msg on a generic AMP PCI dev.
+
+	 If unsure, say N.
+
 config VIRTIO_DMA_SHARED_BUFFER
 	tristate
 	depends on DMA_SHARED_BUFFER
