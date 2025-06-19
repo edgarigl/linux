@@ -35,7 +35,7 @@ static int virtio_msg_amp_transfer(struct virtio_msg_device *vmdev,
 	struct virtio_msg_amp_device *vmadev = to_virtio_msg_amp_device(vmdev);
 	struct virtio_msg_amp *amp_dev = vmadev->amp_dev;
 	struct device *pdev = amp_dev->ops->get_device(amp_dev);
-	int len = sizeof(*request);
+	int len = 64;
 	int rc = 0;
 	u16 match = MK_RESP(request->type | VIRTIO_MSG_TYPE_RESPONSE, request->msg_id);
 
@@ -185,7 +185,7 @@ static bool vmadev_check_rx_match(
 	//	match, vmadev->expected_response);
 
 	if (vmadev->expected_response == match ) {
-		memcpy(vmadev->response, msg, sizeof(*msg));
+		memcpy(vmadev->response, msg, 64);
 		vmadev->expected_response = 0;
 		complete(&vmadev->response_done);
 		return true;
