@@ -46,8 +46,6 @@ static irqreturn_t sapphire_irq_handler(int irq, void *dev_id)
 	err = virtio_msg_amp_notify_rx(&sapphire_dev->amp_dev, 0);
 	if (err)
 		dev_err(&sapphire_dev->pdev->dev, "sapphire IRQ error %d", err);
-	//else
-	//	dev_info(&sapphire_dev->pdev->dev, "ivshmem IRQ fired");
 
 	return IRQ_HANDLED;
 }
@@ -66,6 +64,7 @@ static int sapphire_tx_notify(struct virtio_msg_amp *_amp_dev, u32 notify_idx) {
 
 	smp_wmb();
 	writel(1, &sapphire_dev->regs->int_status);
+	readl(&sapphire_dev->regs->int_status);
 	return 0;
 }
 
@@ -123,6 +122,8 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	const char *name;
 	phys_addr_t addr;
 	resource_size_t	size;
+	void *bar;
+	u64 bar64;
 
 	printk("%s\n", __func__);
 	sapphire_dev = devm_kzalloc(&pdev->dev, sizeof(struct sapphire_dev),
@@ -146,28 +147,36 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto error;
 	}
 
-	err = pcim_iomap_regions(pdev, BIT(1) | BIT(2), device_name);
+	err = pcim_iomap_regions(pdev, BIT(0) | BIT(1), device_name);
 	if (err) {
 		goto error;
 	}
 
+	/*
 	name = "mmr (BAR0)";
 	addr = pci_resource_start(pdev, 0);
 	size = pci_resource_len(pdev, 0);
 	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
-
+*/
 	name = "msix (BAR1)";
+	addr = pci_resource_start(pdev, 0);
+	size = pci_resource_len(pdev, 0);
+	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
+
+	name = "shmem (BAR2)";
 	addr = pci_resource_start(pdev, 1);
 	size = pci_resource_len(pdev, 1);
 	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
 
-	name = "shmem (BAR2)";
-	addr = pci_resource_start(pdev, 2);
-	size = pci_resource_len(pdev, 2);
-	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
+	bar64  = bar = pcim_iomap_table(pdev)[1];
+	sapphire_dev->cfg_bram = bar64;
+	sapphire_dev->regs = bar64 + 0x50000;
 
-	sapphire_dev->cfg_bram  = pcim_iomap_table(pdev)[1];
-	sapphire_dev->regs  = pcim_iomap_table(pdev)[2];
+	printk("BAR1 %p %p %lx\n", pcim_iomap_table(pdev)[1], bar, (uintptr_t) bar + 0x4000);
+	printk("bar=%p\n", bar);
+	printk("bar64=0x%llx %llx\n", bar64, bar64 + 0x4000);
+	printk("bram=%llx\n", sapphire_dev->cfg_bram);
+	printk("regs=%llx\n", sapphire_dev->regs);
 
 	/*
 	 * Grab all vectors although we can only coalesce them into a single
