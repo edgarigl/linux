@@ -69,7 +69,7 @@ static int virtio_msg_amp_transfer(struct virtio_msg_device *vmdev,
 	tx_msg(amp_dev, request, len);
 
 	if (response) {
-		if (!wait_for_it(&vmadev->response_done, 5000 * 20)) {
+		if (!wait_for_it(&vmadev->response_done, 50000)) {
 			dev_err(pdev,
 			  "response wait timeout dev_id=%d, type/id=%04x\n",
 			  vmadev->dev_id, match);
@@ -266,8 +266,8 @@ int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	init_vmadev(&amp_dev->one_dev, amp_dev, 0);
 
 	/* create the structures that point to the message FIFOs in memory */
-	spsc_open(&amp_dev->drv2dev, "drv2dev", page0, page_size);
-	spsc_open(&amp_dev->dev2drv, "dev2drv", page1, page_size);
+	spsc_init(&amp_dev->drv2dev, "drv2dev", spsc_capacity(page_size), page0);
+	spsc_init(&amp_dev->dev2drv, "dev2drv", spsc_capacity(page_size), page1);
 
 	/* empty the rx queue */
 	rx_proc_all(amp_dev);
