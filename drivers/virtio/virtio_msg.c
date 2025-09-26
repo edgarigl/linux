@@ -143,7 +143,7 @@ static int virtio_msg_finalize_features(struct virtio_device *vdev)
 	/* Give virtio_ring a chance to accept features. */
 	vring_transport_features(vdev);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_DRV_FEATURES, sizeof(*payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_DRV_FEATURES, sizeof(*payload) + 2 * 4);
 	payload->index = 0;
 
 	/* FIXME: Linux supports 64 feature bits */
