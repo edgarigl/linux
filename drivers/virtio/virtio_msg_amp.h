@@ -18,7 +18,7 @@
 
 #include <linux/device.h>
 
-#include "virtio_msg.h"
+#include "virtio_msg_internal.h"
 
 #include "spsc_queue.h"
 
