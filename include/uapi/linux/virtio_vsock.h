@@ -87,6 +87,9 @@ enum virtio_vsock_op {
 	VIRTIO_VSOCK_OP_CREDIT_UPDATE = 6,
 	/* Request the peer to send the credit info to us */
 	VIRTIO_VSOCK_OP_CREDIT_REQUEST = 7,
+
+	/* Share memory with the peer */
+	VIRTIO_VSOCK_OP_SHMEM = 8,
 };
 
 /* VIRTIO_VSOCK_OP_SHUTDOWN flags values */

@@ -208,4 +208,29 @@ struct sockaddr_vm {
 
 #define VSOCK_RECVERR	1
 
+/* Ancillary message types (SOL_VSOCK cmsg) */
+#define SCM_VSOCK_SHMEM  1
+
+/* SHMEM control constants (userspace) */
+#define VSOCK_SHMEM_SUBOP_OFFER    0
+#define VSOCK_SHMEM_SUBOP_ACCEPT   1
+#define VSOCK_SHMEM_SUBOP_REVOKE   2
+
+/* SHMEM flags for descriptor (userspace-visible) */
+#define VSOCK_SHMEM_F_READONLY     (1U << 0)
+#define VSOCK_SHMEM_F_COHERENT     (1U << 1)
+
+/*
+ * Userspace-visible descriptor transferred as ancillary cmsg payload and
+ * carried as payload for VIRTIO_VSOCK_OP_SHMEM control packet.
+ */
+struct vsock_shmem_desc {
+	__u64 token;		/* app correlation token */
+	__u64 size;		/* size in bytes */
+	__u32 flags;		/* VSOCK_SHMEM_F_* */
+	__u32 region_id;	/* region identifier (virtio-shmem/ivshmem/etc) */
+	__u32 subop;		/* VSOCK_SHMEM_SUBOP_* hint */
+	__s32 fd;		/* file descriptor to transfer */
+};
+
 #endif /* _UAPI_VM_SOCKETS_H */

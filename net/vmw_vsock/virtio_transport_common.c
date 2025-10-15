@@ -525,6 +525,51 @@ static int virtio_transport_send_credit_update(struct vsock_sock *vsk)
 	return virtio_transport_send_pkt_info(vsk, &info);
 }
 
+int virtio_transport_send_shmem(struct vsock_sock *vsk,
+		const struct vsock_shmem_desc *desc)
+{
+	size_t dlen = sizeof(*desc);
+	struct msghdr msg = {};
+	struct virtio_vsock_pkt_info info = {
+		.op = VIRTIO_VSOCK_OP_SHMEM,
+		.vsk = vsk,
+		.msg = &msg,
+		.pkt_len = dlen,
+	};
+	struct kvec iov = {
+		.iov_base = (void *)desc,
+		.iov_len = dlen,
+	};
+
+	iov_iter_kvec(&msg.msg_iter, WRITE, &iov, 1, dlen);
+
+	return virtio_transport_send_pkt_info(vsk, &info);
+}
+EXPORT_SYMBOL_GPL(virtio_transport_send_shmem);
+
+static int virtio_transport_receive_shmem(struct vsock_sock *vsk,
+					  struct sk_buff *skb)
+{
+	struct virtio_vsock_hdr *hdr = virtio_vsock_hdr(skb);
+	struct vsock_shmem_desc desc;
+	int err;
+
+	/* parse payload into vsock_shmem_desc and hand up */
+	if (le32_to_cpu(hdr->len) != sizeof(desc))
+		return -EINVAL;
+
+	/* copy payload after the virtio_vsock_hdr */
+	err = skb_copy_bits(skb, 0, &desc, sizeof(desc));
+	if (err) {
+		pr_err("vsock: failed to copy shmem desc\n");
+		return err;
+	}
+
+	/* hand it up to AF_VSOCK */
+	vsock_shmem_received(vsk, &desc);
+	return 0;
+}
+
 static ssize_t
 virtio_transport_stream_do_peek(struct vsock_sock *vsk,
 				struct msghdr *msg,
@@ -1431,6 +1476,9 @@ virtio_transport_recv_connected(struct sock *sk,
 		break;
 	case VIRTIO_VSOCK_OP_RST:
 		virtio_transport_do_close(vsk, true);
+		break;
+	case VIRTIO_VSOCK_OP_SHMEM:
+		err = virtio_transport_receive_shmem(vsk, skb);
 		break;
 	default:
 		err = -EINVAL;

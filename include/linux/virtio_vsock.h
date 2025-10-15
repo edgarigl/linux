@@ -229,6 +229,9 @@ int virtio_transport_notify_send_post_enqueue(struct vsock_sock *vsk,
 	ssize_t written, struct vsock_transport_send_notify_data *data);
 void virtio_transport_notify_buffer_size(struct vsock_sock *vsk, u64 *val);
 
+int virtio_transport_send_shmem(struct vsock_sock *vsk,
+				const struct vsock_shmem_desc *desc);
+
 u64 virtio_transport_stream_rcvhiwat(struct vsock_sock *vsk);
 bool virtio_transport_stream_is_active(struct vsock_sock *vsk);
 bool virtio_transport_stream_allow(u32 cid, u32 port);

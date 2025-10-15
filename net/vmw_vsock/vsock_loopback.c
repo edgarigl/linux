@@ -99,6 +99,7 @@ static struct virtio_transport loopback_transport = {
 		.notify_set_rcvlowat      = virtio_transport_notify_set_rcvlowat,
 
 		.unsent_bytes             = virtio_transport_unsent_bytes,
+		.send_shmem               = virtio_transport_send_shmem,
 
 		.read_skb = virtio_transport_read_skb,
 	},

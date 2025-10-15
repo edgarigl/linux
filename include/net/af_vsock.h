@@ -9,6 +9,7 @@
 #define __AF_VSOCK_H__
 
 #include <linux/kernel.h>
+#include <linux/list.h>
 #include <linux/workqueue.h>
 #include <net/sock.h>
 #include <uapi/linux/vm_sockets.h>
@@ -73,6 +74,13 @@ struct vsock_sock {
 
 	/* Private to transport. */
 	void *trans;
+
+	/*
+	 * Queue of pending SHMEM events for userspace
+	 * (list of struct vsock_shmem_evt).
+	 */
+	spinlock_t shmem_lock;
+	struct list_head shmem_q;
 };
 
 s64 vsock_connectible_has_data(struct vsock_sock *vsk);
@@ -183,6 +191,10 @@ struct vsock_transport {
 
 	/* Zero-copy. */
 	bool (*msgzerocopy_allow)(void);
+
+	/* Optional transport hook to send a SHMEM control pkt */
+	int (*send_shmem)(struct vsock_sock *vsk,
+			  const struct vsock_shmem_desc *desc);
 };
 
 /**** CORE ****/
@@ -255,4 +267,8 @@ static inline bool vsock_msgzerocopy_allow(const struct vsock_transport *t)
 {
 	return t->msgzerocopy_allow && t->msgzerocopy_allow();
 }
+
+/* transport -> core: notify that a SHMEM control pkt was received */
+void vsock_shmem_received(struct vsock_sock *vsk,
+			  const struct vsock_shmem_desc *desc);
 #endif /* __AF_VSOCK_H__ */
