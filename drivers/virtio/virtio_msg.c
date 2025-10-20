@@ -408,9 +408,7 @@ int virtio_msg_event(struct virtio_msg_device *vmdev, struct virtio_msg *vmsg)
 
 		virtio_device_for_each_vq(&vmdev->vdev, vq) {
 			if (index == vq->index) {
-				if (vring_interrupt(0, vq) != IRQ_HANDLED)
-					return -EIO;
-
+				vring_interrupt(0, vq);
 				return 0;
 			}
 		}
