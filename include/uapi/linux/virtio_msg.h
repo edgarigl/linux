@@ -33,7 +33,7 @@
 #define VIRTIO_MSG_EVENT_USED			0x42
 #define VIRTIO_MSG_MAX				VIRTIO_MSG_EVENT_USED
 
-#define VIRTIO_MSG_MIN_SIZE			46
+#define VIRTIO_MSG_MIN_SIZE			50
 #define VIRTIO_MSG_MAX_SIZE			65536
 #define VIRTIO_MSG_REVISION_1			0x1
 
@@ -112,6 +112,7 @@ struct get_vqueue_resp {
 	__le32 index;
 	__le32 max_size;
 	__le32 size;
+	__le32 reserved;
 	__le64 descriptor_addr;
 	__le64 driver_addr;
 	__le64 device_addr;
@@ -121,6 +122,7 @@ struct set_vqueue {
 	__le32 index;
 	__le32 unused;
 	__le32 size;
+	__le32 reserved;
 	__le64 descriptor_addr;
 	__le64 driver_addr;
 	__le64 device_addr;
