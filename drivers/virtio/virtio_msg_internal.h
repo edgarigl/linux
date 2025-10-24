@@ -55,7 +55,8 @@ struct virtio_msg_device {
 int virtio_msg_register(struct virtio_msg_device *vmdev);
 void virtio_msg_unregister(struct virtio_msg_device *vmdev);
 
-void virtio_msg_prepare(struct virtio_msg *vmsg, u8 msg_id, u16 payload_size);
+void virtio_msg_prepare(struct virtio_msg *vmsg, u8 msg_id,
+			u16 token, u16 payload_size);
 int virtio_msg_event(struct virtio_msg_device *vmdev, struct virtio_msg *vmsg);
 
 /* Virtio msg userspace interface */

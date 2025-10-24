@@ -31,7 +31,7 @@
 	container_of(_dev, struct virtio_msg_device, vdev)
 
 static void msg_prepare(struct virtio_msg *vmsg, bool bus, u8 msg_id,
-			u16 dev_id, u16 payload_size)
+			u16 dev_id, u16 token, u16 payload_size)
 {
 	u16 size = sizeof(*vmsg) + payload_size;
 
@@ -45,13 +45,15 @@ static void msg_prepare(struct virtio_msg *vmsg, bool bus, u8 msg_id,
 	}
 
 	vmsg->msg_id = msg_id;
+	vmsg->token = cpu_to_le16(token);
 	vmsg->msg_size = cpu_to_le16(size);
 }
 
 static void transport_msg_prepare(struct virtio_msg_device *vmdev, u8 msg_id,
-				  u16 payload_size)
+				  u16 token, u16 payload_size)
 {
-	msg_prepare(vmdev->request, false, msg_id, vmdev->dev_id, payload_size);
+	msg_prepare(vmdev->request, false, msg_id, vmdev->dev_id, token,
+		    payload_size);
 }
 
 /**
@@ -63,9 +65,10 @@ static void transport_msg_prepare(struct virtio_msg_device *vmdev, u8 msg_id,
  * Prepares a virtio_msg structure for transmission over the bus transport
  * (VIRTIO_MSG_TYPE_BUS). The payload buffer follows the header.
  */
-void virtio_msg_prepare(struct virtio_msg *vmsg, u8 msg_id, u16 payload_size)
+void virtio_msg_prepare(struct virtio_msg *vmsg, u8 msg_id, u16 token,
+			u16 payload_size)
 {
-	msg_prepare(vmsg, true, msg_id, 0, payload_size);
+	msg_prepare(vmsg, true, msg_id, 0, token, payload_size);
 }
 EXPORT_SYMBOL_GPL(virtio_msg_prepare);
 
@@ -103,7 +106,7 @@ static int virtio_msg_get_device_info(struct virtio_msg_device *vmdev)
 	static_assert(sizeof(*vmdev->response) + sizeof(*payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_DEVICE_INFO, 0);
+	transport_msg_prepare(vmdev, VIRTIO_MSG_DEVICE_INFO, 1, 0);
 
 	ret = virtio_msg_xfer(vmdev);
 	if (ret)
@@ -145,7 +148,7 @@ static u64 virtio_msg_get_features(struct virtio_device *vdev)
 	static_assert(sizeof(*vmdev->response) + sizeof(*res_payload)
 		      + 2 * sizeof(*features) < VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_DEV_FEATURES,
+	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_DEV_FEATURES, 1,
 			      sizeof(*req_payload));
 
 	/* Linux supports 64 feature bits */
@@ -172,7 +175,7 @@ static int virtio_msg_finalize_features(struct virtio_device *vdev)
 	/* Give virtio_ring a chance to accept features */
 	vring_transport_features(vdev);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_DRV_FEATURES,
+	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_DRV_FEATURES, 1,
 			      sizeof(*payload) + 2 * sizeof(*features));
 
 	/* Linux supports 64 feature bits */
@@ -208,7 +211,7 @@ static void virtio_msg_get(struct virtio_device *vdev, unsigned int offset,
 	/* Maximum payload size available in the response message buffer */
 	max = vmdev->msg_size - sizeof(*vmdev->response) - sizeof(*res_payload);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_CONFIG, sizeof(*req_payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_CONFIG, 1, sizeof(*req_payload));
 
 	while (i != len) {
 		u32 size = min(max, len - i);
@@ -248,7 +251,7 @@ static void virtio_msg_set(struct virtio_device *vdev, unsigned int offset,
 	max = vmdev->msg_size - fixed_size;
 
 	/* Message size is set before sending the message */
-	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_CONFIG, 0);
+	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_CONFIG, 1, 0);
 	payload->generation = cpu_to_le32(vmdev->generation_count);
 
 	while (i != len) {
@@ -275,7 +278,7 @@ static u32 virtio_msg_generation(struct virtio_device *vdev)
 	struct get_config *req_payload = virtio_msg_payload(vmdev->request);
 	struct get_config_resp *res_payload = virtio_msg_payload(vmdev->response);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_CONFIG, sizeof(*req_payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_CONFIG, 1, sizeof(*req_payload));
 	req_payload->offset = cpu_to_le32(0);
 	req_payload->size = cpu_to_le32(0);
 
@@ -294,7 +297,7 @@ static u8 virtio_msg_get_status(struct virtio_device *vdev)
 	static_assert(sizeof(*vmdev->response) + sizeof(*payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_DEVICE_STATUS, 0);
+	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_DEVICE_STATUS, 1, 0);
 
 	if (virtio_msg_xfer(vmdev))
 		return 0;
@@ -310,7 +313,7 @@ static void virtio_msg_set_status(struct virtio_device *vdev, u8 status)
 	static_assert(sizeof(*vmdev->request) + sizeof(*payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_DEVICE_STATUS, sizeof(*payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_DEVICE_STATUS, 1, sizeof(*payload));
 	payload->status = cpu_to_le32(status);
 
 	if (virtio_msg_xfer(vmdev))
@@ -325,7 +328,7 @@ static void virtio_msg_vq_reset(struct virtqueue *vq)
 	static_assert(sizeof(*vmdev->request) + sizeof(*payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_RESET_VQUEUE, sizeof(*payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_RESET_VQUEUE, 1, sizeof(*payload));
 	payload->index = cpu_to_le32(vq->index);
 
 	if (virtio_msg_xfer(vmdev))
@@ -347,7 +350,7 @@ static bool _vmsg_notify(struct virtqueue *vq, u32 index, u32 offset, u32 wrap)
 	static_assert(sizeof(*vmdev->request) + sizeof(*payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_EVENT_AVAIL, sizeof(*payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_EVENT_AVAIL, 0, sizeof(*payload));
 	payload->index = cpu_to_le32(index);
 
 	val = offset & ((1U << VIRTIO_MSG_EVENT_AVAIL_WRAP_SHIFT) - 1);
@@ -444,7 +447,7 @@ static int virtio_msg_vq_get(struct virtio_msg_device *vmdev, unsigned int *num,
 	static_assert(sizeof(*vmdev->response) + sizeof(*res_payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_VQUEUE, sizeof(*req_payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_GET_VQUEUE, 1, sizeof(*req_payload));
 	req_payload->index = cpu_to_le32(index);
 
 	ret = virtio_msg_xfer(vmdev);
@@ -466,7 +469,7 @@ static int virtio_msg_vq_set(struct virtio_msg_device *vmdev,
 	static_assert(sizeof(*vmdev->request) + sizeof(*payload) <
 		      VIRTIO_MSG_MIN_SIZE);
 
-	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_VQUEUE, sizeof(*payload));
+	transport_msg_prepare(vmdev, VIRTIO_MSG_SET_VQUEUE, 1, sizeof(*payload));
 	payload->index = cpu_to_le32(index);
 	payload->size = cpu_to_le32(virtqueue_get_vring_size(vq));
 	payload->descriptor_addr = cpu_to_le64(virtqueue_get_desc_addr(vq));

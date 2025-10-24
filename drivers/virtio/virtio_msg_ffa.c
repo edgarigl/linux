@@ -189,7 +189,7 @@ static int used_event_task(void *data)
 	u32 index;
 	int i;
 
-	virtio_msg_prepare(vmsg, VIRTIO_MSG_EVENT_USED, sizeof(*payload));
+	virtio_msg_prepare(vmsg, VIRTIO_MSG_EVENT_USED, 0, sizeof(*payload));
 
 	while (!kthread_should_stop()) {
 		for (i = 0; i < vmfdev->vmdev_count; i++) {
@@ -320,7 +320,7 @@ static int vmsg_ffa_bus_get_devices(struct virtio_msg_ffa_device *vmfdev,
 		      VIRTIO_MSG_FFA_BUS_MSG_SIZE);
 
 	virtio_msg_prepare(request, VIRTIO_MSG_BUS_GET_DEVICES,
-			   sizeof(*req_payload));
+			   1, sizeof(*req_payload));
 	req_payload->offset = 0;
 	req_payload->num = cpu_to_le16(0xFF);
 
@@ -362,7 +362,7 @@ static int vmsg_ffa_bus_version(struct virtio_msg_ffa_device *vmfdev)
 		      VIRTIO_MSG_FFA_BUS_MSG_SIZE);
 
 	virtio_msg_prepare(request, VIRTIO_MSG_FFA_BUS_VERSION,
-			   sizeof(*req_payload));
+			   1, sizeof(*req_payload));
 	req_payload->driver_version = cpu_to_le32(VIRTIO_MSG_FFA_BUS_VERSION_1_0);
 	req_payload->vmsg_revision = cpu_to_le32(VIRTIO_MSG_REVISION_1);
 	req_payload->vmsg_features = cpu_to_le32(VIRTIO_MSG_FEATURES);
@@ -468,7 +468,7 @@ static int vmsg_ffa_bus_area_share_single(struct ffa_device *ffa_dev, void *vadd
 	area->count = 1;
 
 	virtio_msg_prepare(request, VIRTIO_MSG_FFA_BUS_AREA_SHARE,
-			   sizeof(*req_payload));
+			   1, sizeof(*req_payload));
 	req_payload->area_id = cpu_to_le16(area->id);
 	req_payload->mem_handle = cpu_to_le64(area->handle);
 	req_payload->count = cpu_to_le32(n_pages);
@@ -564,7 +564,7 @@ static int vmsg_ffa_bus_area_unshare_single(struct ffa_device *ffa_dev,
 		      VIRTIO_MSG_FFA_BUS_MSG_SIZE);
 
 	virtio_msg_prepare(request, VIRTIO_MSG_FFA_BUS_AREA_UNSHARE,
-			   sizeof(*req_payload));
+			   1, sizeof(*req_payload));
 	req_payload->area_id = cpu_to_le16(area->id);
 
 	ret = vmfdev->send(vmfdev, request, response, &vmfdev->idata);

@@ -33,7 +33,7 @@
 #define VIRTIO_MSG_EVENT_USED			0x42
 #define VIRTIO_MSG_MAX				VIRTIO_MSG_EVENT_USED
 
-#define VIRTIO_MSG_MIN_SIZE			44
+#define VIRTIO_MSG_MIN_SIZE			46
 #define VIRTIO_MSG_MAX_SIZE			65536
 #define VIRTIO_MSG_REVISION_1			0x1
 
@@ -167,6 +167,7 @@ struct virtio_msg {
 
 	__u8 msg_id;
 	__le16 dev_id;
+	__le16 token;
 	__le16 msg_size;
 	__u8 payload[];
 } __attribute__((packed));
