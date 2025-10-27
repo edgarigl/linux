@@ -170,10 +170,12 @@ static struct virtio_msg_amp_device *amp_find_dev(
 	//printk(KERN_ERR "find device %d to %d\n",
 	//	dev_id, amp_dev->one_dev.dev_id);
 
-	if (amp_dev->one_dev.dev_id == dev_id)
-		return &amp_dev->one_dev;
+	if (dev_id > ARRAY_SIZE(amp_dev->devs))
+	    return NULL;
+	if (!amp_dev->devs[dev_id].amp_dev)
+	    return NULL;
 
-	return NULL;
+	return &amp_dev->devs[dev_id];
 }
 
 static bool vmadev_check_rx_match(
@@ -195,6 +197,34 @@ static bool vmadev_check_rx_match(
 	return false;
 }
 
+static void vmadev_bus_rx(struct virtio_msg_amp *amp_dev,
+		struct virtio_msg *msg) {
+	int err = 0;
+
+	if (msg->msg_id == VIRTIO_MSG_BUS_GET_DEVICES) {
+		struct bus_get_devices_resp *payload = virtio_msg_payload(msg);
+		u16 offset = le16_to_cpu(payload->offset);
+		u16 num = le16_to_cpu(payload->num);
+		u8 *data = &payload->devices[0];
+		int i;
+
+		if (offset != 0 || num != VMA_MAX_DEVS)
+			return;
+
+		for (i = 0; i < num; i++) {
+			if (data[i / 8] & (1 << (i & 7))) {
+				/* create the first (and only) device */
+				init_vmadev(&amp_dev->devs[i], amp_dev, i);
+				/* register with the virtio-msg common code */
+				err = virtio_msg_register(&amp_dev->devs[i].this_dev);
+				if (err) {
+					printk("Failed to register dev %d\n", err);
+				}
+			}
+		}
+	}
+}
+
 static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 	struct device *pdev = amp_dev->ops->get_device(amp_dev);
 	struct virtio_msg_amp_device *vmadev;
@@ -207,6 +237,13 @@ static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 	while (spsc_recv(&amp_dev->dev2drv, buf, VIRTIO_MSG_AMP_SIZE)) {
 		dev_dbg(pdev, "RX MSG: %40ph \n", buf);
 		msg = (struct virtio_msg*) buf;
+
+		if (msg->type & VIRTIO_MSG_TYPE_BUS) {
+			memcpy(amp_dev->rx_bus_buf, buf, 64);
+			schedule_work(&amp_dev->reg_work);
+			continue;
+		}
+
 		dev_id =  le16_to_cpu(msg->dev_id);
 		if ((vmadev = amp_find_dev(amp_dev, dev_id))) {
 			if (vmadev_check_rx_match(vmadev, msg)) {
@@ -256,31 +293,36 @@ u8 test_msg[64] = {
 };
 #endif
 
+static void reg_dev_handler(struct work_struct *ws)
+{
+	struct virtio_msg_amp *amp_dev =
+		container_of(ws, struct virtio_msg_amp, reg_work);
+	struct virtio_msg *msg = (void *) amp_dev->rx_bus_buf;
+
+	vmadev_bus_rx(amp_dev, msg);
+}
+
 /* normal API */
 int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	size_t page_size = 4096;
 	char* mem = amp_dev->shmem;
 	void* page0 = &mem[0 * page_size];
 	void* page1 = &mem[1 * page_size];
-	int err;
+	u8 buf[64];
+	struct virtio_msg *msg = (void *) buf;
+	struct bus_get_devices *payload = virtio_msg_payload(msg);
+	int err = 0;
 
-	/* create the first (and only) device */
-	init_vmadev(&amp_dev->one_dev, amp_dev, 0);
-
+	printk("%s:\n", __func__);
+	INIT_WORK(&amp_dev->reg_work, reg_dev_handler);
 	/* create the structures that point to the message FIFOs in memory */
 	spsc_init(&amp_dev->drv2dev, "drv2dev", spsc_capacity(page_size), page0);
 	spsc_init(&amp_dev->dev2drv, "dev2drv", spsc_capacity(page_size), page1);
 
-	/* empty the rx queue */
-	rx_proc_all(amp_dev);
-
-	//tx_msg(amp_dev, test_msg, 64);
-	//pr_err("drv2dev [0]: %64ph \n", page0);
-	//pr_err("drv2dev [1]: %64ph \n", ((u8*) page0) + 64);
-	//pr_err("drv2dev [1]: %64ph \n", ((u8*) page0) + 128);
-
-	/* register with the virtio-msg common code */
-	err = virtio_msg_register(&amp_dev->one_dev.this_dev);
+	virtio_msg_prepare(msg, VIRTIO_MSG_BUS_GET_DEVICES, 0, sizeof(*payload));
+	payload->offset = cpu_to_le16(0);
+	payload->num = cpu_to_le16(VMA_MAX_DEVS);
+	tx_msg(amp_dev, msg, 64);
 
 	return err;
 }
@@ -293,7 +335,12 @@ static void virtio_msg_amp_device_unregister(
 
 void virtio_msg_amp_unregister(struct virtio_msg_amp *amp_dev) {
 	/* destroy all devices */
-	virtio_msg_amp_device_unregister(&amp_dev->one_dev);
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(amp_dev->devs); i++) {
+		if (amp_dev->devs[i].amp_dev)
+			virtio_msg_amp_device_unregister(&amp_dev->devs[i]);
+	}
 }
 
 int  virtio_msg_amp_notify_rx(struct virtio_msg_amp *amp_dev, u32 notify_idx) {
