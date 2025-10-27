@@ -205,6 +205,12 @@ config VIRTIO_MSG_LOOPBACK
 
 	 If unsure, say N.
 
+config VIRTIO_MSG_FFA_DMA_OPS
+	bool "virtio message FFA DMA OPS support"
+	depends on ARCH_HAS_DMA_OPS && VIRTIO_MSG_FFA
+	help
+	  Enables DMA FFA OPS support for Virtio message.
+
 config VIRTIO_DMA_SHARED_BUFFER
 	tristate
 	depends on DMA_SHARED_BUFFER
