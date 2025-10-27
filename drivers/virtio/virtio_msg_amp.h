@@ -47,6 +47,7 @@ struct virtio_msg_amp_device {
  * struct virtio_msg_amp - an abstraction for a base device with
  * shared memory and notifications
  */
+#define VMA_MAX_DEVS 32
 struct virtio_msg_amp {
 	struct device *dev;
 	struct virtio_msg_amp_ops *ops;
@@ -63,11 +64,14 @@ struct virtio_msg_amp {
 	struct list_head devices;
 
 	/* only do one device for now */
-	struct virtio_msg_amp_device one_dev;
+	struct virtio_msg_amp_device devs[VMA_MAX_DEVS];
 
 	/* messgae FIFOs */
 	struct spsc_queue drv2dev;	/* driver to device */
 	struct spsc_queue dev2drv;	/* device to driver */
+
+	struct work_struct reg_work;
+	u8 rx_bus_buf[64];
 
 	/* irq context private */
 	u8 rx_temp_buf[64];
