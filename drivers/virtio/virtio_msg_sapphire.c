@@ -207,17 +207,12 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			                                 &sapphire_dev->shmem_dma,
                                                          GFP_KERNEL);
 	sapphire_dev->amp_dev.shmem_size = 8 * 1024;
+	memset(sapphire_dev->amp_dev.shmem, 0, sapphire_dev->amp_dev.shmem_size);
 	printk("%s: shmem=%p %llx\n", __func__,
             sapphire_dev->amp_dev.shmem,
             sapphire_dev->shmem_dma);
 
 	dev_info(&pdev->dev, "SHMEM @ 0: %32ph \n", sapphire_dev->amp_dev.shmem);
-
-	addr = sapphire_dev->shmem_dma;
-	sapphire_dev->cfg_bram[0x4000/4 + 1] = addr;
-	sapphire_dev->cfg_bram[0x4000/4 + 2] = addr >> 32;
-	smp_wmb();
-	sapphire_dev->cfg_bram[0x4000/4 + 0] = 1;
 
 	hrtimer_setup(&sapphire_dev->poll_timer, &sapphire_poll_timer_expired,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -230,6 +225,12 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = virtio_msg_amp_register(&sapphire_dev->amp_dev);
 	if (err)
 		goto error_reg;
+
+	addr = sapphire_dev->shmem_dma;
+	sapphire_dev->cfg_bram[0x4000/4 + 1] = addr;
+	sapphire_dev->cfg_bram[0x4000/4 + 2] = addr >> 32;
+	smp_wmb();
+	sapphire_dev->cfg_bram[0x4000/4 + 0] = 1;
 
 	sapphire_dev->probed_ok = true;
 
