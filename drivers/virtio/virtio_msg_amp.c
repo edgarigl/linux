@@ -267,14 +267,23 @@ static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 static void tx_msg(struct virtio_msg_amp *amp_dev, void* msg_buf,
 	size_t msg_len) {
 	struct device *pdev = amp_dev->ops->get_device(amp_dev);
+	bool sent;
 
 	dev_dbg(pdev, "TX MSG: %40ph \n", msg_buf);
 
 	/* queue a message */
-	while ( ! spsc_send(&amp_dev->drv2dev, msg_buf, msg_len) ) {
-		dev_info(pdev, "out of tx space, sleep");
-		mdelay(10);
-	}
+	do {
+		unsigned long flags;
+
+		spin_lock_irqsave(&amp_dev->tx_lock, flags);
+		sent = spsc_send(&amp_dev->drv2dev, msg_buf, msg_len);
+		spin_unlock_irqrestore(&amp_dev->tx_lock, flags);
+
+		if (!sent) {
+			dev_info(pdev, "out of tx space, sleep");
+			mdelay(10);
+		}
+	} while (!sent);
 
 	/* Notify the peer */
 	amp_dev->ops->tx_notify(amp_dev, 0);
@@ -314,6 +323,7 @@ int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	int err = 0;
 
 	printk("%s:\n", __func__);
+	spin_lock_init(&amp_dev->tx_lock);
 	INIT_WORK(&amp_dev->reg_work, reg_dev_handler);
 	/* create the structures that point to the message FIFOs in memory */
 	spsc_init(&amp_dev->drv2dev, "drv2dev", spsc_capacity(page_size), page0);

@@ -69,6 +69,7 @@ struct virtio_msg_amp {
 	/* messgae FIFOs */
 	struct spsc_queue drv2dev;	/* driver to device */
 	struct spsc_queue dev2drv;	/* device to driver */
+	spinlock_t tx_lock;
 
 	struct work_struct reg_work;
 	u8 rx_bus_buf[64];
