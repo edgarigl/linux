@@ -213,7 +213,7 @@ static void vmadev_bus_rx(struct virtio_msg_amp *amp_dev,
 
 		for (i = 0; i < num; i++) {
 			if (data[i / 8] & (1 << (i & 7))) {
-				/* create the first (and only) device */
+				printk("%s: register %d\n", __func__, i);
 				init_vmadev(&amp_dev->devs[i], amp_dev, i);
 				/* register with the virtio-msg common code */
 				err = virtio_msg_register(&amp_dev->devs[i].this_dev);
@@ -338,8 +338,10 @@ void virtio_msg_amp_unregister(struct virtio_msg_amp *amp_dev) {
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(amp_dev->devs); i++) {
-		if (amp_dev->devs[i].amp_dev)
+		if (amp_dev->devs[i].amp_dev) {
+			printk("%s: unregister %d\n", __func__, i);
 			virtio_msg_amp_device_unregister(&amp_dev->devs[i]);
+		}
 	}
 }
 
