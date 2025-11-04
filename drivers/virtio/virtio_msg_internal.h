@@ -53,6 +53,7 @@ struct virtio_msg_device {
 	void *priv;
 
 	struct virtio_msg *request;
+	struct virtio_msg *event;
 	struct virtio_msg *response;
 };
 
