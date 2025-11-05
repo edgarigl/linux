@@ -197,9 +197,46 @@ static bool vmadev_check_rx_match(
 	return false;
 }
 
+static enum hrtimer_restart ping_timer_expired(struct hrtimer *hrtimer)
+{
+	struct virtio_msg_amp *amp_dev =
+		container_of(hrtimer, struct virtio_msg_amp, ping_timer);
+	struct virtio_msg *msg = (void *) amp_dev->tx_bus_buf;
+	struct bus_ping *payload = virtio_msg_payload(msg);
+
+	if (atomic_read(&amp_dev->msg_count) == 0) {
+		printk("Bus went stale. teardown!\n");
+		schedule_work(&amp_dev->teardown_work);
+		return HRTIMER_NORESTART;
+	}
+
+	atomic_set(&amp_dev->msg_count, 0);
+	hrtimer_forward_now(hrtimer, ms_to_ktime(1000));
+
+	virtio_msg_prepare(msg, VIRTIO_MSG_BUS_PING, 0, sizeof(*payload));
+	payload->data = cpu_to_le32(1);
+	tx_msg(amp_dev, msg, 64);
+
+	return HRTIMER_RESTART;
+}
+
 static void vmadev_bus_rx(struct virtio_msg_amp *amp_dev,
 		struct virtio_msg *msg) {
 	int err = 0;
+
+	if (msg->msg_id == VIRTIO_MSG_BUS_EVENT_DEVICE) {
+		struct bus_event_device *payload = virtio_msg_payload(msg);
+		u16 dev_num = le16_to_cpu(payload->dev_num);
+		u16 dev_state = le16_to_cpu(payload->dev_state);
+
+		printk("%s:%d: dev_state=%x\n", __func__, __LINE__, dev_state);
+		if ((dev_state & VIRTIO_MSG_BUS_EVENT_DEV_STATE_REMOVED) &&
+		    amp_dev->devs[dev_num].this_dev.ops) {
+			printk("%s: Unregister dev %d\n", __func__, dev_num);
+			virtio_msg_unregister(&amp_dev->devs[dev_num].this_dev);
+			memset(&amp_dev->devs[dev_num].this_dev, 0, sizeof(amp_dev->devs[dev_num].this_dev));
+		}
+	}
 
 	if (msg->msg_id == VIRTIO_MSG_BUS_GET_DEVICES) {
 		struct bus_get_devices_resp *payload = virtio_msg_payload(msg);
@@ -237,6 +274,8 @@ static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 	while (spsc_recv(&amp_dev->dev2drv, buf, VIRTIO_MSG_AMP_SIZE)) {
 		dev_dbg(pdev, "RX MSG: %40ph \n", buf);
 		msg = (struct virtio_msg*) buf;
+
+		atomic_inc(&amp_dev->msg_count);
 
 		if (msg->type & VIRTIO_MSG_TYPE_BUS) {
 			memcpy(amp_dev->rx_bus_buf, buf, 64);
@@ -302,6 +341,22 @@ u8 test_msg[64] = {
 };
 #endif
 
+static void teardown_handler(struct work_struct *ws)
+{
+	struct virtio_msg_amp *amp_dev =
+		container_of(ws, struct virtio_msg_amp, teardown_work);
+	int i;
+
+	printk("Tearing down!\n");
+	for (i = 0; i < ARRAY_SIZE(amp_dev->devs); i++) {
+		if (amp_dev->devs[i].this_dev.ops) {
+			printk("unreg dev[%d]\n", i);
+			virtio_msg_unregister(&amp_dev->devs[i].this_dev);
+			memset(&amp_dev->devs[i].this_dev, 0, sizeof(amp_dev->devs[i].this_dev));
+		}
+	}
+}
+
 static void reg_dev_handler(struct work_struct *ws)
 {
 	struct virtio_msg_amp *amp_dev =
@@ -323,7 +378,9 @@ int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	int err = 0;
 
 	printk("%s:\n", __func__);
+	atomic_set(&amp_dev->msg_count, 1);
 	spin_lock_init(&amp_dev->tx_lock);
+	INIT_WORK(&amp_dev->teardown_work, teardown_handler);
 	INIT_WORK(&amp_dev->reg_work, reg_dev_handler);
 	/* create the structures that point to the message FIFOs in memory */
 	spsc_init(&amp_dev->drv2dev, "drv2dev", spsc_capacity(page_size), page0);
@@ -333,6 +390,10 @@ int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	payload->offset = cpu_to_le16(0);
 	payload->num = cpu_to_le16(VMA_MAX_DEVS);
 	tx_msg(amp_dev, msg, 64);
+
+        hrtimer_setup(&amp_dev->ping_timer, ping_timer_expired,
+		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_start(&amp_dev->ping_timer, ms_to_ktime(50), HRTIMER_MODE_REL);
 
 	return err;
 }
