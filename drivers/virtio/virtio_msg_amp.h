@@ -71,7 +71,12 @@ struct virtio_msg_amp {
 	struct spsc_queue dev2drv;	/* device to driver */
 	spinlock_t tx_lock;
 
+	struct work_struct teardown_work;
+	struct hrtimer ping_timer;
+	atomic_t msg_count;
+
 	struct work_struct reg_work;
+	u8 tx_bus_buf[64];
 	u8 rx_bus_buf[64];
 
 	/* irq context private */
