@@ -41,6 +41,9 @@ static int virtio_msg_amp_transfer(struct virtio_msg_device *vmdev,
 	int rc = 0;
 	u16 match = MK_RESP(request->type | VIRTIO_MSG_TYPE_RESPONSE, request->msg_id);
 
+	if (amp_dev->error)
+		return -2;
+
 	if (response) {
 		/* init a bad response in case we fail or timeout */
 		response->type = 0;
@@ -207,6 +210,7 @@ static enum hrtimer_restart ping_timer_expired(struct hrtimer *hrtimer)
 	if (atomic_read(&amp_dev->msg_count) == 0) {
 		printk("Bus went stale. teardown!\n");
 		schedule_work(&amp_dev->teardown_work);
+		amp_dev->error = true;
 		return HRTIMER_NORESTART;
 	}
 
@@ -309,6 +313,8 @@ static void tx_msg(struct virtio_msg_amp *amp_dev, void* msg_buf,
 	bool sent;
 
 	dev_dbg(pdev, "TX MSG: %40ph \n", msg_buf);
+	if (amp_dev->error)
+		return;
 
 	/* queue a message */
 	do {
@@ -407,6 +413,14 @@ static void virtio_msg_amp_device_unregister(
 void virtio_msg_amp_unregister(struct virtio_msg_amp *amp_dev) {
 	/* destroy all devices */
 	int i;
+
+	/* This stops the tx/rx path.  */
+	amp_dev->error = true;
+
+	/* wait until the workqueue stopped */
+	cancel_work_sync(&amp_dev->teardown_work);
+	cancel_work_sync(&amp_dev->reg_work);
+	hrtimer_cancel(&amp_dev->ping_timer);
 
 	for (i = 0; i < ARRAY_SIZE(amp_dev->devs); i++) {
 		if (amp_dev->devs[i].amp_dev) {
