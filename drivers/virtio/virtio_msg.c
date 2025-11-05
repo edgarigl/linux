@@ -89,13 +89,14 @@ static int virtio_msg_xfer(struct virtio_msg_device *vmdev)
 	ret = vmdev->ops->transfer(vmdev, vmdev->request, vmdev->response);
 	if (ret)
 		dev_err(&vmdev->vdev.dev, "Transfer request failed (%d)\n", ret);
-
-	if (vmdev->request->token != vmdev->response->token) {
-		printk("req: token=%x msg_id=%x    resp: token=%x msg_id=%x\n",
-			vmdev->request->token, vmdev->request->msg_id, vmdev->response->token, vmdev->response->msg_id);
+	else {
+		WARN_ON(vmdev->request->token != vmdev->response->token);
+		if (vmdev->request->token != vmdev->response->token) {
+			printk("req: token=%x msg_id=%x    resp: token=%x msg_id=%x\n",
+				vmdev->request->token, vmdev->request->msg_id,
+				vmdev->response->token, vmdev->response->msg_id);
+		}
 	}
-
-	WARN_ON(vmdev->request->token != vmdev->response->token);
 
 	return ret;
 }

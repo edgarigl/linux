@@ -207,7 +207,7 @@ static enum hrtimer_restart ping_timer_expired(struct hrtimer *hrtimer)
 	struct virtio_msg *msg = (void *) amp_dev->tx_bus_buf;
 	struct bus_ping *payload = virtio_msg_payload(msg);
 
-	if (atomic_read(&amp_dev->msg_count) == 0) {
+	if (amp_dev->in_use && atomic_read(&amp_dev->msg_count) == 0) {
 		printk("Bus went stale. teardown!\n");
 		schedule_work(&amp_dev->teardown_work);
 		amp_dev->error = true;
@@ -217,9 +217,12 @@ static enum hrtimer_restart ping_timer_expired(struct hrtimer *hrtimer)
 	atomic_set(&amp_dev->msg_count, 0);
 	hrtimer_forward_now(hrtimer, ms_to_ktime(1000));
 
-	virtio_msg_prepare(msg, VIRTIO_MSG_BUS_PING, 0, sizeof(*payload));
-	payload->data = cpu_to_le32(1);
-	tx_msg(amp_dev, msg, 64);
+	if (amp_dev->in_use) {
+		/* Send bus-ping.  */
+		virtio_msg_prepare(msg, VIRTIO_MSG_BUS_PING, 0, sizeof(*payload));
+		payload->data = cpu_to_le32(1);
+		tx_msg(amp_dev, msg, 64);
+	}
 
 	return HRTIMER_RESTART;
 }
@@ -254,6 +257,7 @@ static void vmadev_bus_rx(struct virtio_msg_amp *amp_dev,
 
 		for (i = 0; i < num; i++) {
 			if (data[i / 8] & (1 << (i & 7))) {
+				amp_dev->in_use = true;
 				printk("%s: register %d\n", __func__, i);
 				init_vmadev(&amp_dev->devs[i], amp_dev, i);
 				/* register with the virtio-msg common code */
@@ -423,7 +427,7 @@ void virtio_msg_amp_unregister(struct virtio_msg_amp *amp_dev) {
 	hrtimer_cancel(&amp_dev->ping_timer);
 
 	for (i = 0; i < ARRAY_SIZE(amp_dev->devs); i++) {
-		if (amp_dev->devs[i].amp_dev) {
+		if (amp_dev->devs[i].this_dev.ops) {
 			printk("%s: unregister %d\n", __func__, i);
 			virtio_msg_amp_device_unregister(&amp_dev->devs[i]);
 		}
