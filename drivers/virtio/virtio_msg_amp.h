@@ -71,6 +71,7 @@ struct virtio_msg_amp {
 	struct spsc_queue dev2drv;	/* device to driver */
 	spinlock_t tx_lock;
 
+	bool in_use;
 	bool error;
 	struct work_struct teardown_work;
 	struct hrtimer ping_timer;
