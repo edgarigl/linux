@@ -222,6 +222,15 @@ static void vmsg_remove(struct pci_dev *pdev)
 	dev_info(&pdev->dev, "device removed\n");
 }
 
+/* Do the minimal to make device harmless. */
+static void vmsg_shutdown(struct pci_dev *pdev)
+{
+	struct vmsg_dev *vmsg_dev = pci_get_drvdata(pdev);
+
+	/* Need to tell our virtio-msg peer we're going down.  */
+	virtio_msg_amp_unregister(&vmsg_dev->amp_dev);
+}
+
 static const struct pci_device_id vmsg_device_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_XILINX, 0x9039) },
 	{ 0 }
@@ -233,6 +242,7 @@ static struct pci_driver virtio_msg_vmsg_driver = {
 	.id_table = vmsg_device_id_table,
 	.probe = vmsg_probe,
 	.remove = vmsg_remove,
+	.shutdown = vmsg_shutdown,
 };
 module_pci_driver(virtio_msg_vmsg_driver);
 
