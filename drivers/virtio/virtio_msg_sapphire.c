@@ -274,6 +274,16 @@ static void sapphire_remove(struct pci_dev *pdev)
 	dev_info(&pdev->dev, "device removed\n");
 }
 
+/* Do the minimal to make device harmless. */
+static void sapphire_shutdown(struct pci_dev *pdev)
+{
+	struct sapphire_dev *sapphire_dev = pci_get_drvdata(pdev);
+
+	/* Need to tell our virtio-msg peer we're going down.  */
+	virtio_msg_amp_unregister(&sapphire_dev->amp_dev);
+	pci_clear_master(pdev);
+}
+
 static const struct pci_device_id sapphire_device_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_XILINX, 0x9038) },
 	{ 0 }
@@ -285,6 +295,7 @@ static struct pci_driver virtio_msg_sapphire_driver = {
 	.id_table = sapphire_device_id_table,
 	.probe = sapphire_probe,
 	.remove = sapphire_remove,
+	.shutdown = sapphire_shutdown,
 };
 module_pci_driver(virtio_msg_sapphire_driver);
 
