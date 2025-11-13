@@ -336,12 +336,36 @@ static void dmabuf_exp_ops_release(struct dma_buf *dma_buf)
 	mutex_unlock(&priv->lock);
 }
 
+static int dmabuf_exp_ops_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+{
+	struct gntdev_dmabuf *g = dmabuf->priv;
+	unsigned long len = vma->vm_end - vma->vm_start;
+	unsigned long uaddr = vma->vm_start;
+	int i, ret;
+
+	if (len != (unsigned long)g->nr_pages << PAGE_SHIFT)
+		return -EINVAL;
+
+	/* Pick attributes similar to your gntdev export flags */
+	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
+	if (g->u.exp.map->flags & GNTDEV_DMA_FLAG_WC)
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+
+	for (i = 0; i < g->nr_pages; i++, uaddr += PAGE_SIZE) {
+		ret = vm_insert_page(vma, uaddr, g->pages[i]);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+
 static const struct dma_buf_ops dmabuf_exp_ops =  {
 	.attach = dmabuf_exp_ops_attach,
 	.detach = dmabuf_exp_ops_detach,
 	.map_dma_buf = dmabuf_exp_ops_map_dma_buf,
 	.unmap_dma_buf = dmabuf_exp_ops_unmap_dma_buf,
 	.release = dmabuf_exp_ops_release,
+	.mmap = dmabuf_exp_ops_mmap,
 };
 
 struct gntdev_dmabuf_export_args {
