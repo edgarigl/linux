@@ -401,8 +401,13 @@ int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	payload->num = cpu_to_le16(VMA_MAX_DEVS);
 	tx_msg(amp_dev, msg, 64);
 
-        hrtimer_setup(&amp_dev->ping_timer, ping_timer_expired,
-		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+#if 1
+	hrtimer_init(&amp_dev->ping_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	amp_dev->ping_timer.function = ping_timer_expired;
+#else
+	hrtimer_setup(&amp_dev->ping_timer, ping_timer_expired,
+			CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+#endif
 	hrtimer_start(&amp_dev->ping_timer, ms_to_ktime(50), HRTIMER_MODE_REL);
 
 	return err;

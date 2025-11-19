@@ -430,12 +430,16 @@ int virtio_msg_event(struct virtio_msg_device *vmdev, struct virtio_msg *vmsg)
 	if (vmsg->msg_id == VIRTIO_MSG_EVENT_USED) {
 		index = le32_to_cpu(payload->index);
 
-		virtio_device_for_each_vq(&vmdev->vdev, vq) {
+		//virtio_device_for_each_vq(&vmdev->vdev, vq) {
+        spin_lock(&vmdev->vdev.vqs_list_lock);
+        list_for_each_entry(vq, &vmdev->vdev.vqs, list) {
 			if (index == vq->index) {
 				vring_interrupt(0, vq);
+                spin_unlock(&vmdev->vdev.vqs_list_lock);
 				return 0;
 			}
 		}
+        spin_unlock(&vmdev->vdev.vqs_list_lock);
 
 		dev_err(dev, "Failed to find virtqueue (%u)", index);
 	} else {
