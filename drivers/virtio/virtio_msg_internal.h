@@ -21,6 +21,7 @@
 
 struct reserved_mem;
 struct virtio_msg_device;
+struct vm_area_struct;
 
 /*
  * struct virtio_msg_ops - Virtio message bus operations.
@@ -80,6 +81,8 @@ struct virtio_msg_user_device {
 	struct virtio_msg *vmsg;
 	struct device *parent;
 	char name[15];
+	int (*mmap)(struct virtio_msg_user_device *vmudev,
+		struct vm_area_struct *vma);
 };
 
 #if IS_REACHABLE(CONFIG_VIRTIO_MSG_USER)

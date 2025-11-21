@@ -52,7 +52,7 @@ static ssize_t vmsg_miscdev_read(struct file *file, char __user *buf,
 }
 
 static ssize_t vmsg_miscdev_write(struct file *file, const char __user *buf,
-				  size_t count, loff_t *pos)
+			   size_t count, loff_t *pos)
 {
 	struct miscdevice *misc = file->private_data;
 	struct virtio_msg_user_device *vmudev = to_virtio_msg_user_device(misc);
@@ -80,10 +80,22 @@ static ssize_t vmsg_miscdev_write(struct file *file, const char __user *buf,
 	return count;
 }
 
+static int vmsg_miscdev_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct miscdevice *misc = file->private_data;
+	struct virtio_msg_user_device *vmudev = to_virtio_msg_user_device(misc);
+
+	if (!vmudev->mmap)
+		return -ENODEV;
+
+	return vmudev->mmap(vmudev, vma);
+}
+
 static const struct file_operations vmsg_miscdev_fops = {
 	.owner = THIS_MODULE,
 	.read = vmsg_miscdev_read,
 	.write = vmsg_miscdev_write,
+	.mmap = vmsg_miscdev_mmap,
 };
 
 /**
