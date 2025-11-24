@@ -11,6 +11,7 @@
 #include <linux/err.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
+#include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
@@ -91,11 +92,28 @@ static int vmsg_miscdev_mmap(struct file *file, struct vm_area_struct *vma)
 	return vmudev->mmap(vmudev, vma);
 }
 
+static __poll_t vmsg_miscdev_poll(struct file *file, poll_table *wait)
+{
+	struct miscdevice *misc = file->private_data;
+	struct virtio_msg_user_device *vmudev = to_virtio_msg_user_device(misc);
+	__poll_t mask = 0;
+
+	poll_wait(file, &vmudev->poll_wq, wait);
+
+	if (READ_ONCE(vmudev->vmsg))
+		mask |= EPOLLIN | EPOLLRDNORM;
+
+	mask |= EPOLLOUT | EPOLLWRNORM;
+
+	return mask;
+}
+
 static const struct file_operations vmsg_miscdev_fops = {
 	.owner = THIS_MODULE,
 	.read = vmsg_miscdev_read,
 	.write = vmsg_miscdev_write,
 	.mmap = vmsg_miscdev_mmap,
+	.poll = vmsg_miscdev_poll,
 };
 
 /**
@@ -122,6 +140,7 @@ int virtio_msg_user_register(struct virtio_msg_user_device *vmudev)
 
 	init_completion(&vmudev->r_completion);
 	init_completion(&vmudev->w_completion);
+	init_waitqueue_head(&vmudev->poll_wq);
 
 	vmudev->misc.parent = vmudev->parent;
 	vmudev->misc.minor = MISC_DYNAMIC_MINOR;
