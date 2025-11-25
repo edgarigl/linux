@@ -62,7 +62,7 @@ static ssize_t vmsg_miscdev_write(struct file *file, const char __user *buf,
 	struct virtio_msg_user_device *vmudev = to_virtio_msg_user_device(misc);
 	struct virtio_msg *vmsg __free(kfree) = NULL;
 
-	if (count < VIRTIO_MSG_MIN_SIZE) {
+	if (count < 8) {
 		dev_err(vmudev->parent, "Trying to write message of incorrect size: %zu\n",
 			count);
 		return 0;
