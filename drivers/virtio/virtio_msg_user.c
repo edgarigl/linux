@@ -53,6 +53,9 @@ static ssize_t vmsg_miscdev_read(struct file *file, char __user *buf,
 
 	vmudev->vmsg = NULL;
 
+	if (vmudev->ops->refill)
+		vmudev->ops->refill(vmudev);
+
 	return count;
 }
 
