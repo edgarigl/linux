@@ -34,6 +34,9 @@ static ssize_t vmsg_miscdev_read(struct file *file, char __user *buf,
 		return 0;
 	}
 
+	if (!READ_ONCE(vmudev->vmsg) && (file->f_flags & O_NONBLOCK))
+		return -EAGAIN;
+
 	/* Wait for the message */
 	ret = wait_for_completion_interruptible(&vmudev->r_completion);
 	if (ret < 0) {
