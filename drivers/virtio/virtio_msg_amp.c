@@ -231,42 +231,64 @@ static void vmadev_bus_rx(struct virtio_msg_amp *amp_dev,
 		struct virtio_msg *msg) {
 	int err = 0;
 
-	if (msg->msg_id == VIRTIO_MSG_BUS_EVENT_DEVICE) {
-		struct bus_event_device *payload = virtio_msg_payload(msg);
-		u16 dev_num = le16_to_cpu(payload->dev_num);
-		u16 dev_state = le16_to_cpu(payload->dev_state);
+	switch (msg->msg_id) {
+	case VIRTIO_MSG_BUS_EVENT_DEVICE:
+		{
+			struct bus_event_device *payload = virtio_msg_payload(msg);
+			u16 dev_num = le16_to_cpu(payload->dev_num);
+			u16 dev_state = le16_to_cpu(payload->dev_state);
 
-		printk("%s:%d: dev_state=%x\n", __func__, __LINE__, dev_state);
-		if ((dev_state & VIRTIO_MSG_BUS_EVENT_DEV_STATE_REMOVED) &&
-		    amp_dev->devs[dev_num].this_dev.ops) {
-			printk("%s: Unregister dev %d\n", __func__, dev_num);
-			virtio_msg_unregister(&amp_dev->devs[dev_num].this_dev);
-			memset(&amp_dev->devs[dev_num].this_dev, 0, sizeof(amp_dev->devs[dev_num].this_dev));
+			printk("%s:%d: dev_state=%x\n", __func__, __LINE__, dev_state);
+			if ((dev_state & VIRTIO_MSG_BUS_EVENT_DEV_STATE_REMOVED) &&
+					amp_dev->devs[dev_num].this_dev.ops) {
+				printk("%s: Unregister dev %d\n", __func__, dev_num);
+				virtio_msg_unregister(&amp_dev->devs[dev_num].this_dev);
+				memset(&amp_dev->devs[dev_num].this_dev, 0, sizeof(amp_dev->devs[dev_num].this_dev));
+			}
+			break;
 		}
-	}
+	case VIRTIO_MSG_BUS_PING:
+		{
+			struct virtio_msg *tmsg = (void *) amp_dev->tx_bus_buf;
+			struct bus_ping *payload = virtio_msg_payload(msg);
+			struct bus_ping *tx_payload = virtio_msg_payload(tmsg);
 
-	if (msg->msg_id == VIRTIO_MSG_BUS_GET_DEVICES) {
-		struct bus_get_devices_resp *payload = virtio_msg_payload(msg);
-		u16 offset = le16_to_cpu(payload->offset);
-		u16 num = le16_to_cpu(payload->num);
-		u8 *data = &payload->devices[0];
-		int i;
+			virtio_msg_prepare(tmsg, VIRTIO_MSG_BUS_PING,
+					   le16_to_cpu(msg->token), sizeof(*tx_payload));
+			tmsg->type |= VIRTIO_MSG_TYPE_RESPONSE;
+			tx_payload->data = cpu_to_le16(payload->data);
+			tx_msg(amp_dev, tmsg, 64);
+			break;
+		}
 
-		if (offset != 0 || num != VMA_MAX_DEVS)
-			return;
+	case VIRTIO_MSG_BUS_GET_DEVICES:
+		{
+			struct bus_get_devices_resp *payload = virtio_msg_payload(msg);
+			u16 offset = le16_to_cpu(payload->offset);
+			u16 num = le16_to_cpu(payload->num);
+			u8 *data = &payload->devices[0];
+			int i;
 
-		for (i = 0; i < num; i++) {
-			if (data[i / 8] & (1 << (i & 7))) {
-				amp_dev->in_use = true;
-				printk("%s: register %d\n", __func__, i);
-				init_vmadev(&amp_dev->devs[i], amp_dev, i);
-				/* register with the virtio-msg common code */
-				err = virtio_msg_register(&amp_dev->devs[i].this_dev);
-				if (err) {
-					printk("Failed to register dev %d\n", err);
+			if (offset != 0 || num != VMA_MAX_DEVS)
+				return;
+
+			for (i = 0; i < num; i++) {
+				if (data[i / 8] & (1 << (i & 7))) {
+					amp_dev->in_use = true;
+					printk("%s: register %d\n", __func__, i);
+					init_vmadev(&amp_dev->devs[i], amp_dev, i);
+					/* register with the virtio-msg common code */
+					err = virtio_msg_register(&amp_dev->devs[i].this_dev);
+					if (err) {
+						printk("Failed to register dev %d\n", err);
+					}
 				}
 			}
+			break;
 		}
+	default:
+		/* Drop.  */
+		break;
 	}
 }
 
