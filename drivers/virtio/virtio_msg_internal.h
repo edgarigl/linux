@@ -70,6 +70,7 @@ struct virtio_msg_user_device;
 
 struct virtio_msg_user_ops {
 	int (*handle)(struct virtio_msg_user_device *vmudev, struct virtio_msg *vmsg);
+	void (*refill)(struct virtio_msg_user_device *vmudev);
 };
 
 /* Host side device using virtio message */
