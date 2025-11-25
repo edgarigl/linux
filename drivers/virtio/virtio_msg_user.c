@@ -14,6 +14,7 @@
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/idr.h>
 
 #include "virtio_msg_internal.h"
 
@@ -133,10 +134,12 @@ static const struct file_operations vmsg_miscdev_fops = {
  *
  * Return: 0 on success, or a negative error code on failure.
  */
+static DEFINE_IDA(vmsg_user_ida);
+
 int virtio_msg_user_register(struct virtio_msg_user_device *vmudev)
 {
-	static u8 vmsg_user_device_count;
 	int ret;
+	int id;
 
 	if (!vmudev || !vmudev->ops)
 		return -EINVAL;
@@ -145,17 +148,24 @@ int virtio_msg_user_register(struct virtio_msg_user_device *vmudev)
 	init_completion(&vmudev->w_completion);
 	init_waitqueue_head(&vmudev->poll_wq);
 
+	id = ida_alloc(&vmsg_user_ida, GFP_KERNEL);
+	if (id < 0)
+		return id;
+
+	vmudev->id = id;
 	vmudev->misc.parent = vmudev->parent;
 	vmudev->misc.minor = MISC_DYNAMIC_MINOR;
 	vmudev->misc.fops = &vmsg_miscdev_fops;
 	vmudev->misc.name = vmudev->name;
-	sprintf(vmudev->name, "virtio-msg-%d", vmsg_user_device_count);
+	snprintf(vmudev->name, sizeof(vmudev->name),
+		 "virtio-msg-%d", id);
 
 	ret = misc_register(&vmudev->misc);
-	if (ret)
+	if (ret) {
+		ida_free(&vmsg_user_ida, id);
 		return ret;
+	}
 
-	vmsg_user_device_count++;
 	return 0;
 }
 EXPORT_SYMBOL_GPL(virtio_msg_user_register);
@@ -170,5 +180,6 @@ EXPORT_SYMBOL_GPL(virtio_msg_user_register);
 void virtio_msg_user_unregister(struct virtio_msg_user_device *vmudev)
 {
 	misc_deregister(&vmudev->misc);
+	ida_free(&vmsg_user_ida, vmudev->id);
 }
 EXPORT_SYMBOL_GPL(virtio_msg_user_unregister);
