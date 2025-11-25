@@ -84,6 +84,7 @@ struct virtio_msg_user_device {
 	int (*mmap)(struct virtio_msg_user_device *vmudev,
 		struct vm_area_struct *vma);
 	wait_queue_head_t poll_wq;
+	int id;
 };
 
 #if IS_REACHABLE(CONFIG_VIRTIO_MSG_USER)
