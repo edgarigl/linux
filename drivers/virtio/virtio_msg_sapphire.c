@@ -8,7 +8,6 @@
 
 #include <linux/module.h>
 #include <linux/delay.h>
-#include <linux/hrtimer.h>
 #include <linux/pci.h>
 #include <linux/completion.h>
 #include <linux/list.h>
@@ -19,6 +18,14 @@
 
 #define DRV_NAME "virtio_msg_sapphire"
 
+#define SAPPHIRE_CFG_OFFSET	(0x4000 / sizeof(u32))
+#define SAPPHIRE_CFG_READY	(SAPPHIRE_CFG_OFFSET + 0)
+#define SAPPHIRE_CFG_ADDR_LO	(SAPPHIRE_CFG_OFFSET + 1)
+#define SAPPHIRE_CFG_ADDR_HI	(SAPPHIRE_CFG_OFFSET + 2)
+
+#define SAPPHIRE_PAGE_SIZE	SZ_4K
+#define SAPPHIRE_MSG_BUF_SIZE	64
+
 struct sapphire_regs {
 	u32 int_status;
 };
@@ -28,7 +35,6 @@ struct sapphire_dev {
 	struct pci_dev *pdev;
 	uint32_t __iomem *cfg_bram;
 	struct sapphire_regs __iomem *regs;
-	struct hrtimer poll_timer; /* Broken MSI.  */
 
 	int vectors;
 
@@ -39,29 +45,14 @@ struct sapphire_dev {
 	struct virtio_msg_user_device vmudev;
 	struct spsc_queue user_drv2dev;
 	struct spsc_queue user_dev2drv;
+	u8 rx_buf[SAPPHIRE_MSG_BUF_SIZE];
 	spinlock_t user_lock;
-	struct list_head user_pending;
-	struct sapphire_user_msg *user_current;
 	bool user_registered;
 	dma_addr_t user_phys;
 	size_t user_size;
 	resource_size_t bar3_start;
 	resource_size_t bar3_size;
 };
-
-struct sapphire_user_msg {
-	struct list_head list;
-	u16 len;
-	struct virtio_msg msg;
-};
-
-#define SAPPHIRE_CFG_OFFSET	(0x4000 / sizeof(u32))
-#define SAPPHIRE_CFG_READY	(SAPPHIRE_CFG_OFFSET + 0)
-#define SAPPHIRE_CFG_ADDR_LO	(SAPPHIRE_CFG_OFFSET + 1)
-#define SAPPHIRE_CFG_ADDR_HI	(SAPPHIRE_CFG_OFFSET + 2)
-
-#define SAPPHIRE_PAGE_SIZE	SZ_4K
-#define SAPPHIRE_MSG_BUF_SIZE	64
 
 static int sapphire_tx_notify(struct virtio_msg_amp *_amp_dev, u32 notify_idx);
 
@@ -70,90 +61,34 @@ static inline struct sapphire_dev *vmudev_to_sapphire(struct virtio_msg_user_dev
 	return container_of(vmudev, struct sapphire_dev, vmudev);
 }
 
-static int sapphire_cfg_queue(struct sapphire_dev *sapphire_dev,
-				dma_addr_t phys, u32 ready)
+static void sapphire_cfg_queue(struct sapphire_dev *sapphire_dev,
+				dma_addr_t phys, u32 ready, unsigned int cb)
 {
-	u32 val;
+	printk("%s: phys=%llx read=%x cb=%d\n", __func__, phys, ready, cb);
+	/* Multipl with CB size.  */
+	cb *= 3;
 
-	writel(lower_32_bits(phys), &sapphire_dev->cfg_bram[SAPPHIRE_CFG_ADDR_LO]);
-	writel(upper_32_bits(phys), &sapphire_dev->cfg_bram[SAPPHIRE_CFG_ADDR_HI]);
+	writel(lower_32_bits(phys), &sapphire_dev->cfg_bram[cb + SAPPHIRE_CFG_ADDR_LO]);
+	writel(upper_32_bits(phys), &sapphire_dev->cfg_bram[cb + SAPPHIRE_CFG_ADDR_HI]);
 	wmb();
-	writel(ready, &sapphire_dev->cfg_bram[SAPPHIRE_CFG_READY]);
+	writel(ready, &sapphire_dev->cfg_bram[cb + SAPPHIRE_CFG_READY]);
 	wmb();
-
-	return readl_poll_timeout(&sapphire_dev->cfg_bram[SAPPHIRE_CFG_READY],
-				val, val == 0, 1, 1000);
 }
 
-static struct sapphire_user_msg *sapphire_user_msg_alloc(const struct virtio_msg *msg,
-					      u16 len, gfp_t gfp)
+static void sapphire_user_process_rx(struct sapphire_dev *s)
 {
-	size_t alloc = sizeof(struct sapphire_user_msg) + len - sizeof(struct virtio_msg);
-	struct sapphire_user_msg *node;
+	bool r;
 
-	node = kzalloc(alloc, gfp);
-	if (!node)
-		return NULL;
-
-	node->len = len;
-	memcpy(&node->msg, msg, len);
-
-	return node;
-}
-
-static void sapphire_user_try_deliver_locked(struct sapphire_dev *sapphire_dev)
-{
-	struct sapphire_user_msg *node;
-
-	if (sapphire_dev->user_current)
+	if (READ_ONCE(s->vmudev.vmsg))
 		return;
 
-	if (READ_ONCE(sapphire_dev->vmudev.vmsg))
+	r = spsc_recv(&s->user_drv2dev, s->rx_buf, sizeof(s->rx_buf));
+	if (!r)
 		return;
 
-	if (list_empty(&sapphire_dev->user_pending))
-		return;
-
-	node = list_first_entry(&sapphire_dev->user_pending,
-				struct sapphire_user_msg, list);
-	list_del_init(&node->list);
-	sapphire_dev->user_current = node;
-	WRITE_ONCE(sapphire_dev->vmudev.vmsg, &node->msg);
-	complete(&sapphire_dev->vmudev.r_completion);
-	wake_up_interruptible(&sapphire_dev->vmudev.poll_wq);
-}
-
-static void sapphire_user_enqueue_rx(struct sapphire_dev *sapphire_dev,
-				      struct virtio_msg *msg, u16 len,
-				      gfp_t gfp)
-{
-	struct sapphire_user_msg *node;
-	unsigned long flags;
-
-	node = sapphire_user_msg_alloc(msg, len, gfp);
-	if (!node)
-		return;
-
-	spin_lock_irqsave(&sapphire_dev->user_lock, flags);
-	list_add_tail(&node->list, &sapphire_dev->user_pending);
-	sapphire_user_try_deliver_locked(sapphire_dev);
-	spin_unlock_irqrestore(&sapphire_dev->user_lock, flags);
-}
-
-static void sapphire_user_process_rx(struct sapphire_dev *sapphire_dev)
-{
-	u8 buf[SAPPHIRE_MSG_BUF_SIZE];
-	struct virtio_msg *msg = (struct virtio_msg *)buf;
-	u32 len;
-
-	while (spsc_recv(&sapphire_dev->user_dev2drv, buf, sizeof(buf))) {
-		len = le16_to_cpu(msg->msg_size);
-		if (!len)
-			len = VIRTIO_MSG_MIN_SIZE;
-		len = min_t(u32, len, VIRTIO_MSG_MAX_SIZE);
-		len = min_t(u32, len, (u32)sizeof(buf));
-		sapphire_user_enqueue_rx(sapphire_dev, msg, (u16)len, GFP_ATOMIC);
-	}
+	s->vmudev.vmsg = (struct virtio_msg *)s->rx_buf;
+	wake_up_interruptible(&s->vmudev.poll_wq);
+	complete(&s->vmudev.r_completion);
 }
 
 static int sapphire_user_handle(struct virtio_msg_user_device *vmudev,
@@ -167,7 +102,7 @@ static int sapphire_user_handle(struct virtio_msg_user_device *vmudev,
 	len = min_t(u32, len, VIRTIO_MSG_MAX_SIZE);
 	len = min_t(u32, len, (u32)SAPPHIRE_MSG_BUF_SIZE);
 
-	if (!spsc_send(&sapphire_dev->user_drv2dev, msg, len))
+	if (!spsc_send(&sapphire_dev->user_dev2drv, msg, len))
 		return -EBUSY;
 
 	smp_wmb();
@@ -179,16 +114,11 @@ static int sapphire_user_handle(struct virtio_msg_user_device *vmudev,
 static void sapphire_user_refill(struct virtio_msg_user_device *vmudev)
 {
 	struct sapphire_dev *sapphire_dev = vmudev_to_sapphire(vmudev);
-	struct sapphire_user_msg *node;
 	unsigned long flags;
 
 	spin_lock_irqsave(&sapphire_dev->user_lock, flags);
-	node = sapphire_dev->user_current;
-	sapphire_dev->user_current = NULL;
 	WRITE_ONCE(vmudev->vmsg, NULL);
-	if (node)
-		kfree(node);
-	sapphire_user_try_deliver_locked(sapphire_dev);
+	sapphire_user_process_rx(sapphire_dev);
 	spin_unlock_irqrestore(&sapphire_dev->user_lock, flags);
 }
 
@@ -227,27 +157,11 @@ static struct virtio_msg_user_ops sapphire_user_uops = {
 
 static void sapphire_user_cleanup(struct sapphire_dev *sapphire_dev)
 {
-	struct sapphire_user_msg *node;
-	unsigned long flags;
-
 	if (!sapphire_dev->user_registered)
 		return;
 
 	virtio_msg_user_unregister(&sapphire_dev->vmudev);
 	sapphire_dev->user_registered = false;
-
-	spin_lock_irqsave(&sapphire_dev->user_lock, flags);
-	if (sapphire_dev->user_current) {
-		kfree(sapphire_dev->user_current);
-		sapphire_dev->user_current = NULL;
-	}
-	while (!list_empty(&sapphire_dev->user_pending)) {
-		node = list_first_entry(&sapphire_dev->user_pending,
-					 struct sapphire_user_msg, list);
-		list_del(&node->list);
-		kfree(node);
-	}
-	spin_unlock_irqrestore(&sapphire_dev->user_lock, flags);
 }
 
 /**
@@ -311,28 +225,6 @@ static struct virtio_msg_amp_ops sapphire_amp_ops = {
 	.get_device  = sapphire_get_device,
 	.release   = sapphire_release
 };
-
-static enum hrtimer_restart sapphire_poll_timer_expired(struct hrtimer *hrtimer)
-{
-	struct sapphire_dev *sapphire_dev =
-		        container_of(hrtimer, struct sapphire_dev, poll_timer);
-	int err;
-
-	if (sapphire_dev->probed_ok) {
-		printk("STOP polled notifications\n");
-		return HRTIMER_NORESTART;
-	}
-
-	/* we always use notify index 0 */
-	err = virtio_msg_amp_notify_rx(&sapphire_dev->amp_dev, 0);
-	if (err)
-		dev_err(&sapphire_dev->pdev->dev, "sapphire NOTIFY error %d", err);
-
-	sapphire_user_process_rx(sapphire_dev);
-
-	hrtimer_forward_now(hrtimer, ms_to_ktime(50));
-        return HRTIMER_RESTART;
-}
 
 static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
@@ -440,8 +332,6 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
             sapphire_dev->shmem_dma);
 
 	spin_lock_init(&sapphire_dev->user_lock);
-	INIT_LIST_HEAD(&sapphire_dev->user_pending);
-	sapphire_dev->user_current = NULL;
 	sapphire_dev->user_registered = false;
 
 	sapphire_dev->user_phys = sapphire_dev->shmem_dma + 2 * SAPPHIRE_PAGE_SIZE;
@@ -460,22 +350,15 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	sapphire_dev->vmudev.parent = &pdev->dev;
 	sapphire_dev->vmudev.mmap = sapphire_user_mmap;
 
-ret = virtio_msg_user_register(&sapphire_dev->vmudev);
-if (ret) {
-	err = ret;
-	goto error_user_register;
-}
+	ret = virtio_msg_user_register(&sapphire_dev->vmudev);
+	if (ret) {
+		err = ret;
+		goto error_user_register;
+	}
 
 	sapphire_dev->user_registered = true;
 
 	dev_info(&pdev->dev, "SHMEM @ 0: %32ph \n", sapphire_dev->amp_dev.shmem);
-
-	hrtimer_setup(&sapphire_dev->poll_timer, &sapphire_poll_timer_expired,
-		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	if (0) {
-		hrtimer_start(&sapphire_dev->poll_timer, ms_to_ktime(50),
-			      HRTIMER_MODE_REL);
-	}
 
 	sapphire_dev->amp_dev.ops = &sapphire_amp_ops;
 	err = virtio_msg_amp_register(&sapphire_dev->amp_dev);
@@ -483,14 +366,9 @@ if (ret) {
 		goto error_reg;
 
 	addr = sapphire_dev->user_phys;
-	ret = sapphire_cfg_queue(sapphire_dev, addr, 1);
-	if (ret)
-		dev_warn(&pdev->dev, "Timeout configuring userspace queue\n");
-
+	sapphire_cfg_queue(sapphire_dev, addr, 2, 1);
 	addr = sapphire_dev->shmem_dma;
-	ret = sapphire_cfg_queue(sapphire_dev, addr, 2);
-	if (ret)
-		dev_warn(&pdev->dev, "Timeout configuring kernel queue\n");
+	sapphire_cfg_queue(sapphire_dev, addr, 1, 0);
 
 	sapphire_dev->probed_ok = true;
 
