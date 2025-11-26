@@ -140,8 +140,8 @@ static int sapphire_user_mmap(struct virtio_msg_user_device *vmudev,
 		return -EINVAL;
 
 	phys = sapphire_dev->bar3_start + offset;
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
+	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+	vm_flags_set(vma, VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP);
 
 	if (remap_pfn_range(vma, vma->vm_start, phys >> PAGE_SHIFT,
 			 size, vma->vm_page_prot))
@@ -260,7 +260,7 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto error;
 	}
 
-	err = pcim_iomap_regions(pdev, BIT(0) | BIT(1), device_name);
+	err = pcim_iomap_regions(pdev, BIT(0) | BIT(1) | BIT(2), device_name);
 	if (err) {
 		goto error;
 	}
