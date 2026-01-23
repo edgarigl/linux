@@ -221,6 +221,7 @@ config VIRTIO_MSG_FFA_DMA_OPS
 
 config VIRTIO_MSG_SAPPHIRE
 	tristate "Virtio-msg support for the sapphire host with VEK280 pci device"
+	depends on PCI && PCI_MSI
 	select VIRTIO_MSG_AMP
 	help
 	 This provides support for using virtio-msg on top of a sapphire host with
