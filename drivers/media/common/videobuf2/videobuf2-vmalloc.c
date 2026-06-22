@@ -30,6 +30,7 @@ struct vb2_vmalloc_buf {
 	refcount_t			refcount;
 	struct vb2_vmarea_handler	handler;
 	struct dma_buf			*dbuf;
+	struct iosys_map		dmabuf_map;
 };
 
 static void vb2_vmalloc_put(void *buf_priv);
@@ -374,6 +375,7 @@ static int vb2_vmalloc_map_dmabuf(void *mem_priv)
 	ret = dma_buf_vmap_unlocked(buf->dbuf, &map);
 	if (ret)
 		return -EFAULT;
+	buf->dmabuf_map = map;
 	buf->vaddr = map.vaddr;
 
 	return 0;
@@ -382,9 +384,9 @@ static int vb2_vmalloc_map_dmabuf(void *mem_priv)
 static void vb2_vmalloc_unmap_dmabuf(void *mem_priv)
 {
 	struct vb2_vmalloc_buf *buf = mem_priv;
-	struct iosys_map map = IOSYS_MAP_INIT_VADDR(buf->vaddr);
 
-	dma_buf_vunmap_unlocked(buf->dbuf, &map);
+	dma_buf_vunmap_unlocked(buf->dbuf, &buf->dmabuf_map);
+	iosys_map_clear(&buf->dmabuf_map);
 	buf->vaddr = NULL;
 }
 
