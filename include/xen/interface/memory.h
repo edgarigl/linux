@@ -162,6 +162,9 @@ DEFINE_GUEST_HANDLE_STRUCT(xen_machphys_mapping_t);
 				    * XENMEM_add_to_physmap_range only.
 				    */
 #define XENMAPSPACE_dev_mmio     5 /* device mmio region */
+#define XENMAPSPACE_gmfn_host    7 /* GMFN from current dom,
+				    * XENMEM_add_to_physmap_range only.
+				    */
 
 /*
  * Sets the GPFN at which a particular page appears in the specified guest's

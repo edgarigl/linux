@@ -37,6 +37,7 @@ xen-gntdev-y				:= gntdev.o
 xen-gntdev-$(CONFIG_XEN_GNTDEV_DMABUF)	+= gntdev-dmabuf.o
 xen-gntalloc-y				:= gntalloc.o
 xen-privcmd-y				:= privcmd.o privcmd-buf.o
+xen-privcmd-$(CONFIG_XEN_HMEM)		+= hmem.o
 obj-$(CONFIG_XEN_FRONT_PGDIR_SHBUF)	+= xen-front-pgdir-shbuf.o
 obj-$(CONFIG_XEN_UNPOPULATED_ALLOC)	+= unpopulated-alloc.o
 obj-$(CONFIG_XEN_GRANT_DMA_OPS)		+= grant-dma-ops.o

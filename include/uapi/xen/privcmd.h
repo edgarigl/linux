@@ -131,6 +131,20 @@ struct privcmd_pcidev_get_gsi {
 	__u32 gsi;
 };
 
+#define XEN_INVALID_GFN ((__u64)-1)
+
+struct privcmd_hmem_op {
+	domid_t dom;
+#define HMEM_ADD_MAPPING	1
+#define HMEM_REMOVE_MAPPING	2
+#define HMEM_SYNC_MAPPING	3
+	__u8 op;
+	__u8 flags;
+	__u32 num;
+	__u64 hva;
+	__u64 gfn;
+};
+
 /*
  * @cmd: IOCTL_PRIVCMD_HYPERCALL
  * @arg: &privcmd_hypercall_t
@@ -164,5 +178,7 @@ struct privcmd_pcidev_get_gsi {
 	_IOW('P', 9, struct privcmd_ioeventfd)
 #define IOCTL_PRIVCMD_PCIDEV_GET_GSI				\
 	_IOC(_IOC_NONE, 'P', 10, sizeof(struct privcmd_pcidev_get_gsi))
+#define IOCTL_PRIVCMD_HMEM_OP					\
+	_IOC(_IOC_NONE, 'P', 11, sizeof(struct privcmd_hmem_op))
 
 #endif /* __LINUX_PUBLIC_PRIVCMD_H__ */

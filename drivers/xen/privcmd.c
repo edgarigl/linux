@@ -56,6 +56,7 @@
 #endif
 
 #include "privcmd.h"
+#include "hmem.h"
 
 MODULE_DESCRIPTION("Xen hypercall passthrough driver");
 MODULE_LICENSE("GPL");
@@ -80,6 +81,7 @@ MODULE_PARM_DESC(unrestricted,
 
 struct privcmd_data {
 	domid_t domid;
+	struct hmem *hmem;
 };
 
 /* DOMID_INVALID implies no restriction */
@@ -883,6 +885,24 @@ static long privcmd_ioctl_pcidev_get_gsi(struct file *file, void __user *udata)
 #endif
 }
 
+static long privcmd_ioctl_hmem_op(struct file *file, void __user *udata)
+{
+	struct privcmd_data *data = file->private_data;
+	struct privcmd_hmem_op op;
+
+	if (!IS_ENABLED(CONFIG_XEN_HMEM) ||
+	    !xen_feature(XENFEAT_auto_translated_physmap))
+		return -EOPNOTSUPP;
+
+	if (copy_from_user(&op, udata, sizeof(op)))
+		return -EFAULT;
+
+	if (data->domid != DOMID_INVALID && data->domid != op.dom)
+		return -EPERM;
+
+	return hmem_handle_op(data->hmem, op);
+}
+
 #ifdef CONFIG_XEN_PRIVCMD_EVENTFD
 /* Irqfd support */
 static struct workqueue_struct *irqfd_cleanup_wq;
@@ -1569,6 +1589,10 @@ static long privcmd_ioctl(struct file *file,
 		ret = privcmd_ioctl_pcidev_get_gsi(file, udata);
 		break;
 
+	case IOCTL_PRIVCMD_HMEM_OP:
+		ret = privcmd_ioctl_hmem_op(file, udata);
+		break;
+
 	default:
 		break;
 	}
@@ -1589,6 +1613,14 @@ static int privcmd_open(struct inode *ino, struct file *file)
 
 	data->domid = target_domain;
 
+	if (IS_ENABLED(CONFIG_XEN_HMEM)) {
+		data->hmem = hmem_init(data->domid);
+		if (!data->hmem) {
+			kfree(data);
+			return -ENOMEM;
+		}
+	}
+
 	file->private_data = data;
 	return 0;
 }
@@ -1596,6 +1628,9 @@ static int privcmd_open(struct inode *ino, struct file *file)
 static int privcmd_release(struct inode *ino, struct file *file)
 {
 	struct privcmd_data *data = file->private_data;
+
+	if (IS_ENABLED(CONFIG_XEN_HMEM))
+		hmem_destroy(data->hmem);
 
 	kfree(data);
 	return 0;

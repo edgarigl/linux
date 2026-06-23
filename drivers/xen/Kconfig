@@ -372,4 +372,14 @@ config XEN_VIRTIO_FORCE_GRANT
 	  of the guest memory. This will need support on the backend side
 	  (e.g. qemu or kernel, depending on the virtio device types used).
 
+config XEN_HMEM
+	bool "Xen hostmem support"
+	depends on XEN_PRIVCMD
+	select HMM_MIRROR
+	select MMU_NOTIFIER
+	help
+	  Allow mapping virtual host memory to another guest.
+
+	  If in doubt, say n.
+
 endmenu
