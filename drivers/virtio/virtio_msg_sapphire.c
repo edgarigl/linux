@@ -18,10 +18,14 @@
 
 #define DRV_NAME "virtio_msg_sapphire"
 
-#define SAPPHIRE_CFG_OFFSET	(0x4000 / sizeof(u32))
-#define SAPPHIRE_CFG_READY	(SAPPHIRE_CFG_OFFSET + 0)
-#define SAPPHIRE_CFG_ADDR_LO	(SAPPHIRE_CFG_OFFSET + 1)
-#define SAPPHIRE_CFG_ADDR_HI	(SAPPHIRE_CFG_OFFSET + 2)
+/*
+ * Word offsets of the handshake inside the cfg BRAM.  cfg_bram already points
+ * at the start of the handshake block (board->cfg_offset is folded in at probe
+ * time), so these are relative to that, not to the BAR.
+ */
+#define SAPPHIRE_CFG_READY	0
+#define SAPPHIRE_CFG_ADDR_LO	1
+#define SAPPHIRE_CFG_ADDR_HI	2
 
 #define SAPPHIRE_PAGE_SIZE	SZ_4K
 #define SAPPHIRE_MSG_BUF_SIZE	64
@@ -30,7 +34,82 @@ struct sapphire_regs {
 	u32 int_status;
 };
 
+/*
+ * Per-board placement of the three things this driver needs in BAR space.
+ *
+ * Both supported boards enumerate as 10ee:9038, so they cannot be told apart
+ * by PCI ID.  They are distinguished by their BAR layout instead, which is the
+ * thing that actually differs -- see sapphire_probe().
+ */
+struct sapphire_board {
+	const char *name;
+
+	/* cfg BRAM: the READY/ADDR_LO/ADDR_HI handshake that publishes the
+	 * SPSC base to the peer.  The peer (QEMU virtio-msg-bus-versal) reads
+	 * it at word 0 of its own bram-base mapping, so cfg_offset has to put
+	 * us at exactly the same place in the BRAM.
+	 */
+	int cfg_bar;
+	unsigned int cfg_offset;
+
+	/* Doorbell: writing 1 to int_status rings the peer. */
+	int regs_bar;
+	unsigned int regs_offset;
+
+	/* Window handed to userspace through the /dev/virtio-msg-* mmap.
+	 * Only its physical address is used (remap_pfn_range), so it is
+	 * deliberately not ioremapped.
+	 */
+	int user_bar;
+
+	/* Width of the DMA mask to take before allocating the SPSC region. */
+	unsigned int dma_bits;
+};
+
+/*
+ * VEK280 behind a sapphire host: one BAR carries both the BRAM (at +0x4000)
+ * and the doorbell (at +0x50000), and BAR2 is the user window.
+ */
+static const struct sapphire_board sapphire_board_vek280 = {
+	.name		= "sapphire/VEK280",
+	.cfg_bar	= 1,
+	.cfg_offset	= 0x4000,
+	.regs_bar	= 1,
+	.regs_offset	= 0x50000,
+	.user_bar	= 2,
+	.dma_bits	= 64,
+};
+
+/*
+ * RAVE2, ECP design.  Regions 0 (1M), 2 (512K), 3 (128K) and 4 (256M, the
+ * Versal's own DDR); there is no BAR1 at all.
+ *
+ * BAR2 translates to Versal AXI 0x0800_0000_0000, so the virtio_net_gen_irq
+ * doorbell (pciebar_13) is BAR2 + 0x50000 -- the same offset as on the VEK280,
+ * but a different BAR.  BAR3 translates to AXI 0x0801_0000_0000, which is the
+ * messaging axi_bram_ctrl, and the BRAM starts at offset 0 of that BAR: the
+ * backend is launched with bram-base=0x0801_0000_0000 and reads the handshake
+ * at word 0, so cfg_offset must be 0 here rather than the VEK280's 0x4000.
+ *
+ * dma_bits is 32 because the backend programs one outbound iATU region with
+ * atu-target = 0 and a 4 GB window, and its setup_queues() computes the queue
+ * pointer as msg.host + spsc_base -- i.e. it treats the published base as an
+ * offset into that window rather than an address to translate.  So the SPSC
+ * region has to land below 4 GB of host physical.  Measured: an unconstrained
+ * dma_alloc_coherent on this host lands at 0x1_4170_0000, i.e. outside it.
+ */
+static const struct sapphire_board sapphire_board_rave2 = {
+	.name		= "rave2/ECP",
+	.cfg_bar	= 3,
+	.cfg_offset	= 0,
+	.regs_bar	= 2,
+	.regs_offset	= 0x50000,
+	.user_bar	= 4,
+	.dma_bits	= 32,
+};
+
 struct sapphire_dev {
+	const struct sapphire_board *board;
 	struct virtio_msg_amp amp_dev;
 	struct pci_dev *pdev;
 	uint32_t __iomem *cfg_bram;
@@ -50,8 +129,10 @@ struct sapphire_dev {
 	bool user_registered;
 	dma_addr_t user_phys;
 	size_t user_size;
-	resource_size_t bar3_start;
-	resource_size_t bar3_size;
+
+	/* board->user_bar, as a physical range; see sapphire_user_mmap(). */
+	resource_size_t user_win_start;
+	resource_size_t user_win_size;
 };
 
 static int sapphire_tx_notify(struct virtio_msg_amp *_amp_dev, u32 notify_idx);
@@ -130,16 +211,16 @@ static int sapphire_user_mmap(struct virtio_msg_user_device *vmudev,
 	resource_size_t offset = (resource_size_t)vma->vm_pgoff << PAGE_SHIFT;
 	resource_size_t phys;
 
-	if (!sapphire_dev->bar3_size)
+	if (!sapphire_dev->user_win_size)
 		return -ENODEV;
 
-	if (offset >= sapphire_dev->bar3_size)
+	if (offset >= sapphire_dev->user_win_size)
 		return -EINVAL;
 
-	if (size > sapphire_dev->bar3_size - offset)
+	if (size > sapphire_dev->user_win_size - offset)
 		return -EINVAL;
 
-	phys = sapphire_dev->bar3_start + offset;
+	phys = sapphire_dev->user_win_start + offset;
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	vm_flags_set(vma, VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP);
 
@@ -229,13 +310,12 @@ static struct virtio_msg_amp_ops sapphire_amp_ops = {
 static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct sapphire_dev *sapphire_dev;
+	const struct sapphire_board *board;
 	int err, irq, ret;
 	const char *device_name;
-	const char *name;
 	phys_addr_t addr;
 	resource_size_t	size;
-	void *bar;
-	u64 bar64;
+	void __iomem * const *iomap;
 	char *shmem;
 
 	printk("%s\n", __func__);
@@ -260,37 +340,67 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto error;
 	}
 
-	err = pcim_iomap_regions(pdev, BIT(0) | BIT(1) | BIT(2), device_name);
+	/*
+	 * Both boards are 10ee:9038, so the ID tells us nothing.  What does
+	 * differ is the BAR layout: the sapphire/VEK280 design puts the BRAM
+	 * and the doorbell in BAR1, while rave2's ECP design has no BAR1 at
+	 * all (it enumerates 0, 2, 3 and 4).  Key off that rather than
+	 * inventing a module parameter.
+	 */
+	board = pci_resource_len(pdev, 1) ? &sapphire_board_vek280
+					  : &sapphire_board_rave2;
+	sapphire_dev->board = board;
+	dev_info(&pdev->dev, "board: %s\n", board->name);
+
+	/*
+	 * Map only what we dereference.  The user window is handed out with
+	 * remap_pfn_range(), which needs its physical address and nothing
+	 * else, so ioremapping it would just burn address space -- 256 MB of
+	 * it on rave2.
+	 */
+	err = pcim_iomap_regions(pdev, BIT(board->cfg_bar) | BIT(board->regs_bar),
+				 device_name);
 	if (err) {
 		goto error;
 	}
+	iomap = pcim_iomap_table(pdev);
 
-	name = "msix (BAR1)";
-	addr = pci_resource_start(pdev, 0);
-	size = pci_resource_len(pdev, 0);
-	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
+	addr = pci_resource_start(pdev, board->user_bar);
+	size = pci_resource_len(pdev, board->user_bar);
+	sapphire_dev->user_win_start = addr;
+	sapphire_dev->user_win_size = size;
+	dev_info(&pdev->dev, "user window (BAR%d) at %pa, size %pa\n",
+		 board->user_bar, &addr, &size);
 
-	addr = pci_resource_start(pdev, 2);
-	size = pci_resource_len(pdev, 2);
-	sapphire_dev->bar3_start = addr;
-	sapphire_dev->bar3_size = size;
-	dev_info(&pdev->dev, "BAR3 (user window) at %pa, size %pa\n", &addr, &size);
+	addr = pci_resource_start(pdev, board->cfg_bar);
+	size = pci_resource_len(pdev, board->cfg_bar);
+	dev_info(&pdev->dev, "cfg BRAM (BAR%d + 0x%x) at %pa, size %pa\n",
+		 board->cfg_bar, board->cfg_offset, &addr, &size);
 
-	name = "shmem (BAR2)";
-	addr = pci_resource_start(pdev, 1);
-	size = pci_resource_len(pdev, 1);
-	dev_info(&pdev->dev, "%s at %pa, size %pa\n", name, &addr, &size);
+	addr = pci_resource_start(pdev, board->regs_bar);
+	size = pci_resource_len(pdev, board->regs_bar);
+	dev_info(&pdev->dev, "doorbell (BAR%d + 0x%x) at %pa, size %pa\n",
+		 board->regs_bar, board->regs_offset, &addr, &size);
 
-	bar = pcim_iomap_table(pdev)[1];
-	bar64 = (uintptr_t) bar;
-	sapphire_dev->cfg_bram = bar;
-	sapphire_dev->regs = bar + 0x50000 / sizeof(*bar);
+	/*
+	 * Both offsets have to fit, or we would be writing the handshake and
+	 * the doorbell into whatever happens to follow the BAR.
+	 */
+	if (pci_resource_len(pdev, board->cfg_bar) <
+	    board->cfg_offset + 3 * sizeof(u32) ||
+	    pci_resource_len(pdev, board->regs_bar) <
+	    board->regs_offset + sizeof(struct sapphire_regs)) {
+		dev_err(&pdev->dev, "BAR too small for the %s layout\n",
+			board->name);
+		err = -ENODEV;
+		goto error;
+	}
 
-	printk("BAR1 %p %p %lx\n", pcim_iomap_table(pdev)[1], bar, (uintptr_t) bar + 0x4000);
-	printk("bar=%p\n", bar);
-	printk("bar64=0x%llx %llx\n", bar64, bar64 + 0x4000);
-	printk("bram=%p\n", sapphire_dev->cfg_bram);
-	printk("regs=%p\n", sapphire_dev->regs);
+	sapphire_dev->cfg_bram = iomap[board->cfg_bar] + board->cfg_offset;
+	sapphire_dev->regs = iomap[board->regs_bar] + board->regs_offset;
+
+	dev_info(&pdev->dev, "bram=%p regs=%p\n",
+		 sapphire_dev->cfg_bram, sapphire_dev->regs);
 
 	/*
 	 * Grab all vectors although we can only coalesce them into a single
@@ -321,10 +431,30 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
             sapphire_dev->shmem_dma);
 	pci_set_master(pdev);
 
+	/*
+	 * Constrain the SPSC allocation to what the peer's outbound window can
+	 * actually reach -- see the dma_bits comment on struct sapphire_board.
+	 * This has to happen before the dma_alloc_coherent() below.
+	 */
+	err = dma_set_mask_and_coherent(&pdev->dev,
+					DMA_BIT_MASK(board->dma_bits));
+	if (err) {
+		dev_err(&pdev->dev, "no usable %u-bit DMA mask\n",
+			board->dma_bits);
+		pci_clear_master(pdev);
+		goto error_irq;
+	}
+
 	/* dma map shmem.  */
 	sapphire_dev->amp_dev.shmem = dma_alloc_coherent(&pdev->dev, 16 * 1024,
 				                                 &sapphire_dev->shmem_dma,
 	                                                        GFP_KERNEL);
+	if (!sapphire_dev->amp_dev.shmem) {
+		dev_err(&pdev->dev, "failed to allocate the shmem region\n");
+		err = -ENOMEM;
+		pci_clear_master(pdev);
+		goto error_irq;
+	}
 	sapphire_dev->amp_dev.shmem_size = 16 * 1024;
 	memset(sapphire_dev->amp_dev.shmem, 0, sapphire_dev->amp_dev.shmem_size);
 	printk("%s: shmem=%p %llx\n", __func__,
