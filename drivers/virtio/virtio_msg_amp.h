@@ -17,6 +17,7 @@
 #define _DRIVERS_VIRTIO_VIRTIO_MSG_AMP_H
 
 #include <linux/device.h>
+#include <linux/kfifo.h>
 
 #include "virtio_msg_internal.h"
 
@@ -43,11 +44,17 @@ struct virtio_msg_amp_device {
 	struct completion response_done;
 };
 
+/* One queued bus message, as it came off the wire. */
+struct virtio_msg_amp_bus_msg {
+	u8 buf[64];
+};
+
 /**
  * struct virtio_msg_amp - an abstraction for a base device with
  * shared memory and notifications
  */
 #define VMA_MAX_DEVS 32
+
 struct virtio_msg_amp {
 	struct device *dev;
 	struct virtio_msg_amp_ops *ops;
@@ -79,7 +86,19 @@ struct virtio_msg_amp {
 
 	struct work_struct reg_work;
 	u8 tx_bus_buf[64];
-	u8 rx_bus_buf[64];
+	/*
+	 * Bus messages are handled from a workqueue because GET_DEVICES
+	 * registers virtio devices, and that sleeps.  More than one can land
+	 * in a single rx drain -- a peer answering our GET_DEVICES while it
+	 * has a PING of its own outstanding is enough -- so queue them.  A
+	 * single slot plus schedule_work() silently dropped all but the last:
+	 * the second memcpy overwrote the first, and schedule_work() on an
+	 * already-pending work is a no-op.
+	 *
+	 * Single producer (the rx path) and single consumer (reg_work, which
+	 * a non-atomic work_struct will not run against itself), so no lock.
+	 */
+	DECLARE_KFIFO(rx_bus_fifo, struct virtio_msg_amp_bus_msg, 16);
 
 	/* irq context private */
 	u8 rx_temp_buf[64];

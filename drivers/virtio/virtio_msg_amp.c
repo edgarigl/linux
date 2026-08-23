@@ -308,8 +308,15 @@ static void rx_proc_all(struct virtio_msg_amp *amp_dev) {
 		atomic_inc(&amp_dev->msg_count);
 
 		if (msg->type & VIRTIO_MSG_TYPE_BUS) {
-			memcpy(amp_dev->rx_bus_buf, buf, 64);
-			schedule_work(&amp_dev->reg_work);
+			struct virtio_msg_amp_bus_msg bmsg;
+
+			memcpy(bmsg.buf, buf, sizeof(bmsg.buf));
+			if (kfifo_in(&amp_dev->rx_bus_fifo, &bmsg, 1) != 1)
+				dev_err(pdev,
+					"bus rx fifo full, dropped type/id=%02x/%02x\n",
+					msg->type, msg->msg_id);
+			else
+				schedule_work(&amp_dev->reg_work);
 			continue;
 		}
 
@@ -393,9 +400,10 @@ static void reg_dev_handler(struct work_struct *ws)
 {
 	struct virtio_msg_amp *amp_dev =
 		container_of(ws, struct virtio_msg_amp, reg_work);
-	struct virtio_msg *msg = (void *) amp_dev->rx_bus_buf;
+	struct virtio_msg_amp_bus_msg bmsg;
 
-	vmadev_bus_rx(amp_dev, msg);
+	while (kfifo_out(&amp_dev->rx_bus_fifo, &bmsg, 1) == 1)
+		vmadev_bus_rx(amp_dev, (struct virtio_msg *) bmsg.buf);
 }
 
 /* normal API */
@@ -414,6 +422,8 @@ int  virtio_msg_amp_register(struct virtio_msg_amp *amp_dev) {
 	spin_lock_init(&amp_dev->tx_lock);
 	INIT_WORK(&amp_dev->teardown_work, teardown_handler);
 	INIT_WORK(&amp_dev->reg_work, reg_dev_handler);
+	/* Before the GET_DEVICES below: its answer can land immediately. */
+	INIT_KFIFO(amp_dev->rx_bus_fifo);
 	/* create the structures that point to the message FIFOs in memory */
 	spsc_init(&amp_dev->drv2dev, "drv2dev", spsc_capacity(page_size), page0);
 	spsc_init(&amp_dev->dev2drv, "dev2drv", spsc_capacity(page_size), page1);
