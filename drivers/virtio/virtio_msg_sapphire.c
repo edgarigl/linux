@@ -153,7 +153,17 @@ static void sapphire_cfg_queue(struct sapphire_dev *sapphire_dev,
 	writel(upper_32_bits(phys), &sapphire_dev->cfg_bram[cb + SAPPHIRE_CFG_ADDR_HI]);
 	wmb();
 	writel(ready, &sapphire_dev->cfg_bram[cb + SAPPHIRE_CFG_READY]);
-	wmb();
+
+	/*
+	 * The cfg BRAM and the doorbell are different completers on the peer
+	 * (BAR3 and BAR2), so nothing orders a posted write to one against a
+	 * posted write to the other -- wmb() only orders this CPU's stores.
+	 * The peer re-reads READY from its doorbell handler, so a doorbell
+	 * that overtakes this write makes it read the old value and skip the
+	 * configuration.  Read the register back: a read cannot pass posted
+	 * writes to the same completer, so the completion proves READY landed.
+	 */
+	(void)readl(&sapphire_dev->cfg_bram[cb + SAPPHIRE_CFG_READY]);
 }
 
 static void sapphire_user_process_rx(struct sapphire_dev *s)
@@ -499,6 +509,15 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	sapphire_cfg_queue(sapphire_dev, addr, 2, 1);
 	addr = sapphire_dev->shmem_dma;
 	sapphire_cfg_queue(sapphire_dev, addr, 1, 0);
+
+	/*
+	 * virtio_msg_amp_register() above already rang the doorbell, for its
+	 * first bus message, and that happened before either channel was
+	 * published -- the peer handled it, read READY == 0 and did nothing.
+	 * Ring again now that both are visible, or that message sits in the
+	 * FIFO until some unrelated doorbell comes along.
+	 */
+	sapphire_tx_notify(&sapphire_dev->amp_dev, 0);
 
 	sapphire_dev->probed_ok = true;
 
