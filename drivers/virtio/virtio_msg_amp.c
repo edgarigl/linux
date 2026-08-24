@@ -173,7 +173,7 @@ static struct virtio_msg_amp_device *amp_find_dev(
 	//printk(KERN_ERR "find device %d to %d\n",
 	//	dev_id, amp_dev->one_dev.dev_id);
 
-	if (dev_id > ARRAY_SIZE(amp_dev->devs))
+	if (dev_id >= ARRAY_SIZE(amp_dev->devs))
 	    return NULL;
 	if (!amp_dev->devs[dev_id].amp_dev)
 	    return NULL;
