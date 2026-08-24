@@ -488,6 +488,7 @@ static int sapphire_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	sapphire_dev->vmudev.ops = &sapphire_user_uops;
 	sapphire_dev->vmudev.parent = &pdev->dev;
+	sapphire_dev->vmudev.owner = THIS_MODULE;
 	sapphire_dev->vmudev.mmap = sapphire_user_mmap;
 
 	ret = virtio_msg_user_register(&sapphire_dev->vmudev);

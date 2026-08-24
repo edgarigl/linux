@@ -718,6 +718,7 @@ static int virtio_msg_ffa_probe(struct ffa_device *ffa_dev)
 	if (vmfdev->passive) {
 		vmfdev->vmudev.ops = &vmf_user_ops;
 		vmfdev->vmudev.parent = &ffa_dev->dev;
+		vmfdev->vmudev.owner = THIS_MODULE;
 
 		ret = virtio_msg_user_register(&vmfdev->vmudev);
 		if (ret) {

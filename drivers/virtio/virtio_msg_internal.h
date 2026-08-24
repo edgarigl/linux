@@ -76,6 +76,12 @@ struct virtio_msg_user_ops {
 /* Host side device using virtio message */
 struct virtio_msg_user_device {
 	struct virtio_msg_user_ops *ops;
+	/*
+	 * The module that owns this structure and its ops.  misc_deregister()
+	 * does not revoke already-open fds, so without pinning the provider a
+	 * rmmod frees poll_wq and the ops out from under a live poller.
+	 */
+	struct module *owner;
 	struct miscdevice misc;
 	struct completion r_completion;
 	struct completion w_completion;

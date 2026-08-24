@@ -300,6 +300,7 @@ static int virtio_msg_lb_probe(struct platform_device *pdev)
 	mutex_init(&vmlb->lock);
 	vmlb->dev = dev;
 	vmlb->vmudev.parent = dev;
+	vmlb->vmudev.owner = THIS_MODULE;
 	vmlb->vmudev.ops = &vmlb_user_ops;
 
 	vmlb->misc.name = "virtio-msg-lb";

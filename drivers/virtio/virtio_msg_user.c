@@ -115,8 +115,36 @@ static __poll_t vmsg_miscdev_poll(struct file *file, poll_table *wait)
 	return mask;
 }
 
+static int vmsg_miscdev_open(struct inode *inode, struct file *file)
+{
+	struct miscdevice *misc = file->private_data;
+	struct virtio_msg_user_device *vmudev = to_virtio_msg_user_device(misc);
+
+	/*
+	 * vmudev, its ops and its wait queue all live in the provider module,
+	 * not in this one.  Hold a reference to it for as long as the fd is
+	 * open so it cannot be unloaded underneath us.
+	 */
+	if (vmudev->owner && !try_module_get(vmudev->owner))
+		return -ENODEV;
+
+	return 0;
+}
+
+static int vmsg_miscdev_release(struct inode *inode, struct file *file)
+{
+	struct miscdevice *misc = file->private_data;
+	struct virtio_msg_user_device *vmudev = to_virtio_msg_user_device(misc);
+
+	module_put(vmudev->owner);
+
+	return 0;
+}
+
 static const struct file_operations vmsg_miscdev_fops = {
 	.owner = THIS_MODULE,
+	.open = vmsg_miscdev_open,
+	.release = vmsg_miscdev_release,
 	.read = vmsg_miscdev_read,
 	.write = vmsg_miscdev_write,
 	.mmap = vmsg_miscdev_mmap,
